@@ -2,6 +2,8 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,res110,res32"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
 
 DATASET:
   NUM_WORKERS: 0
@@ -25,12 +27,14 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  TEMPERATURE: 4.0
+  # 当前正式最好：74.99%（seed=42，教师 BN 修复后完整复验）。
+  TEMPERATURE: 3.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 1.0
+  CV_WEIGHT: 0.25
   TAU_W: 0.8
+  TAU_S: 0.5
+  # 该教师-学生组合已验证的原型参数。
   PROTO_TEMP: 0.5
-  PROTO_MAX_WEIGHT: 1.0
-  PROTO_MIN_WEIGHT: 0.0
-  PROTO_TAU_W: 0.80
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  PROTO_TAU_W: 0.75
+  PROTO_K: 3

@@ -2,6 +2,8 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld,res32x4,wrn_16_2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD"
+  BASELINE: ""
 DISTILLER:
   TYPE: "CRLD"
   TEACHER: "resnet32x4"

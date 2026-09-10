@@ -1,7 +1,9 @@
 EXPERIMENT:
   NAME: ""
-  TAG: "crld_proto,res32x4,res8x4,logit_soft_a05_m005"
+  TAG: "crld_proto,res32x4,res8x4"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
 
 DATASET:
   NUM_WORKERS: 0
@@ -24,17 +26,14 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
+  # 当前正式最好 77.33% 对应 PROTO_TEMP=0.15。0.20 复验为
+  # 77.10%，未刷新历史最好，继续保留 0.15。
   TEMPERATURE: 4.0
-  TAU_W: 0.8
-  PROTO_TEMP: 0.5
-  PROTO_MAX_WEIGHT: 1.0
-  PROTO_MIN_WEIGHT: 0.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 2.0
+  CV_WEIGHT: 0.5
+  TAU_W: 0.9
+  TAU_S: 0.2
+  PROTO_TEMP: 0.15
   PROTO_TAU_W: 0.80
-  LOGIT_SWAP: True
-  LOGIT_SWAP_ALPHA: 0.5
-  LOGIT_SWAP_MARGIN: 0.05
-  LOGIT_SWAP_DISABLE_PROTO: True
-  
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  PROTO_K: 3

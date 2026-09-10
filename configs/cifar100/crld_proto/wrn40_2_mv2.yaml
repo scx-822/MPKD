@@ -2,10 +2,19 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,wrn40_2,mv2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
+
+DATASET:
+  NUM_WORKERS: 0
+  TEST:
+    BATCH_SIZE: 64
+
 DISTILLER:
   TYPE: "CRLD_Proto"
   TEACHER: "wrn_40_2"
   STUDENT: "MobileNetV2"
+
 SOLVER:
   BATCH_SIZE: 64
   EPOCHS: 240
@@ -16,10 +25,16 @@ SOLVER:
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
-# <--- 加上这个块，确保参数传递正确
+
 CRLD:
+  # 尚未训练的初始候选；对应 CRLD 基线为 70.37%。
+  # WRN 教师强视图噪声较大，因此降低交叉视图权重并提高门控阈值。
   TEMPERATURE: 3.0
-  WARMUP: 20
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 1.0
+  CV_WEIGHT: 0.1
+  TAU_W: 0.8
+  TAU_S: 0.65
+  PROTO_TEMP: 0.35
+  PROTO_TAU_W: 0.80
+  PROTO_K: 3

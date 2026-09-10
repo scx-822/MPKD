@@ -358,7 +358,9 @@ def get_tinyimagenet200_dataloaders(batch_size, val_batch_size, num_workers, mea
     train_set = TinyImageNet200(train_folder, transform=train_transform)
     num_data = len(train_set)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = get_tinyimagenet200_val_loader(val_batch_size, mean, std) # IMPORTANT - is this wrong?
+    test_loader = get_tinyimagenet200_val_loader(
+        val_batch_size, mean, std, num_workers=num_workers
+    )
     return train_loader, test_loader, num_data
 
 def get_tinyimagenet200_dataloaders_strong(batch_size, val_batch_size, num_workers,
@@ -369,7 +371,9 @@ def get_tinyimagenet200_dataloaders_strong(batch_size, val_batch_size, num_worke
     num_data = len(train_set)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
         shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = get_tinyimagenet200_val_loader(val_batch_size, mean, std)
+    test_loader = get_tinyimagenet200_val_loader(
+        val_batch_size, mean, std, num_workers=num_workers
+    )
     return train_loader, test_loader, num_data
 
 def get_tinyimagenet200_dataloaders_sample(batch_size, val_batch_size, num_workers, k=4096, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
@@ -379,14 +383,27 @@ def get_tinyimagenet200_dataloaders_sample(batch_size, val_batch_size, num_worke
     num_data = len(train_set)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
         shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = get_tinyimagenet200_val_loader(val_batch_size, mean, std)
+    test_loader = get_tinyimagenet200_val_loader(
+        val_batch_size, mean, std, num_workers=num_workers
+    )
     return train_loader, test_loader, num_data
 
-def get_tinyimagenet200_val_loader(val_batch_size, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]): # IMPORTANT
+def get_tinyimagenet200_val_loader(
+    val_batch_size,
+    mean=[0.485, 0.456, 0.406],
+    std=[0.229, 0.224, 0.225],
+    num_workers=0,
+):
     test_transform = get_tinyimagenet200_test_transform(mean, std) # IMPORTANT
     test_folder = os.path.join(data_folder, 'val')
     test_set = ImageFolder(test_folder, transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=val_batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        test_set,
+        batch_size=val_batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
     return test_loader
 
 def get_tinyimagenet200_dataloaders_384(batch_size, val_batch_size, num_workers, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
@@ -396,7 +413,9 @@ def get_tinyimagenet200_dataloaders_384(batch_size, val_batch_size, num_workers,
     num_data = len(train_set)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
         shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = get_tinyimagenet200_val_loader_384(val_batch_size, mean, std)
+    test_loader = get_tinyimagenet200_val_loader_384(
+        val_batch_size, mean, std, num_workers=num_workers
+    )
     return train_loader, test_loader, num_data
 
 def get_tinyimagenet200_dataloaders_384_strong(batch_size, val_batch_size, num_workers, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
@@ -406,13 +425,25 @@ def get_tinyimagenet200_dataloaders_384_strong(batch_size, val_batch_size, num_w
     num_data = len(train_set)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
         shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = get_tinyimagenet200_val_loader_384(val_batch_size, mean, std)
+    test_loader = get_tinyimagenet200_val_loader_384(
+        val_batch_size, mean, std, num_workers=num_workers
+    )
     return train_loader, test_loader, num_data
 
-def get_tinyimagenet200_val_loader_384(val_batch_size, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+def get_tinyimagenet200_val_loader_384(
+    val_batch_size,
+    mean=[0.485, 0.456, 0.406],
+    std=[0.229, 0.224, 0.225],
+    num_workers=0,
+):
     test_transform = get_tinyimagenet200_test_transform_384(mean, std)
     test_folder = os.path.join(data_folder, 'val')
     test_set = ImageFolder(test_folder, transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set,
-        batch_size=val_batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        test_set,
+        batch_size=val_batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
     return test_loader

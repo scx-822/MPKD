@@ -2,6 +2,8 @@
 
 本项目在 CRLD（Cross-View Consistency Regularisation for Knowledge Distillation）的基础上，引入 **GLVQ 多中心类别原型**，用于修正教师模型在强增强视图下产生的不可靠软标签。
 
+方法关系必须明确区分：**CRLD 是原始文献基线，CRLD-Proto 是本文在完整 CRLD 损失结构上加入原型修正后的方法**。配置中的 Python 标识 `CRLD_Proto` 仅因类名不能使用连字符；论文、日志和结果表统一显示为 `CRLD-Proto`。
+
 核心目标是解决以下问题：
 
 > 在知识蒸馏中，教师模型面对强增强数据时会产生不可靠预测，严重影响一致性正则化的有效性。弱增强视图通常保持较高预测可靠性，因此可以利用弱视图构建纯净类别先验，对强视图教师目标进行动态修正。
@@ -115,17 +117,21 @@ output/cifar100_baselines/crld_proto,res32x4,res8x4
 configs/cifar100/crld_proto/res56_res20.yaml
 ```
 
-该配置对应基础 CRLD-Proto：
+该配置运行 CRLD-Proto，而不是重新定义 CRLD 基线：
 
 ```text
 GLVQ 多中心原型 + log-sum-exp + 概率级原型先验融合
 ```
 
-历史最好记录：
+历史削弱结构记录（仅供追溯，不作为当前 CRLD-Proto 正式结果）：
 
 ```text
-best_acc = 72.15
+historical reduced-CRLD result: best_acc = 72.15
 ```
+
+当前 `tools/train_proto.py` 保留完整 CRLD 的监督损失、同视图蒸馏和交叉视图蒸馏，
+仅将教师强视图同视图目标替换为可靠性门控的原型修正目标。因此，基线方法写作
+`CRLD`，本文实验方法写作 `CRLD-Proto`，二者不能混写。
 
 输出目录：
 
@@ -152,7 +158,48 @@ download_ckpts/
 output/
 ```
 
-请在本地准备 CIFAR-100 数据和教师模型权重。目录结构可参考原 mdistiller / CRLD 工程。
+本工作区已经准备好 CIFAR-100、Tiny-ImageNet-200、6 个 CIFAR 教师权重、本地训练的 Tiny-ImageNet ResNet32x4 教师权重，以及 ImageNet ResNet34/ResNet50 官方教师权重。资源状态和 SHA-256 信息见：
+
+```text
+experiments/resources_manifest.json
+```
+
+如需重新检查或在另一台机器复现公开资源准备流程：
+
+```powershell
+python tools/prepare_experiments.py
+python tools/prepare_experiments.py --prepare-public
+```
+
+目前仍需用户提供的资源只有遵守许可获取的 ImageNet 原始数据。当前实验顺序、CIFAR-100 A-E/门控消融以及跨数据集安排见：
+
+```text
+experiments/RUN_ORDER.md
+experiments/EXPERIMENT_MATRIX.md
+experiments/ABLATION_RESULTS.md
+experiments/COMPATIBILITY_PROTOCOL.md
+```
+
+第一阶段先检查 A-E 消融将使用的命令和独立输出目录：
+
+```powershell
+python tools/run_cifar100_ablations.py --phase ae --dry-run
+```
+
+确认无误后，按 A、B、C、D、E 顺序执行：
+
+```powershell
+python tools/run_cifar100_ablations.py --phase ae
+```
+
+每组结果分别写入带 `ablation_a` 至 `ablation_e` 后缀的目录，不会覆盖正式 CRLD-Proto 的输出。门控因子消融和 KD/DKD/NKD 兼容性实验排在 A-E 之后，具体定义以实验协议为准。
+
+ImageNet 数据必须整理为：
+
+```text
+data/imagenet/train/<class>/*.JPEG
+data/imagenet/val/<class>/*.JPEG
+```
 
 ### 3. 训练当前实验
 

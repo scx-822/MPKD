@@ -10,11 +10,56 @@ from mdistiller.models import cifar_model_dict, imagenet_model_dict, tinyimagene
 from mdistiller.distillers import distiller_dict
 from mdistiller.dataset import get_dataset
 from mdistiller.engine.utils import load_checkpoint, log_msg
-from mdistiller.engine.cfg import CFG as cfg
+from mdistiller.engine.cfg import CFG as cfg, merge_cfg_from_file
 from mdistiller.engine.cfg import show_cfg
 from mdistiller.engine import trainer_dict
 
 from timm.models import create_model
+
+
+def _project_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _load_local_state_dict(path):
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.join(_project_root(), path)
+    path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"Teacher checkpoint not found: {path}. "
+            "Run tools/prepare_experiments.py or provide it explicitly."
+        )
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(checkpoint, dict):
+        for key in ("model", "state_dict", "model_state_dict"):
+            if key in checkpoint and isinstance(checkpoint[key], dict):
+                checkpoint = checkpoint[key]
+                break
+    if not isinstance(checkpoint, dict):
+        raise RuntimeError(f"Unsupported checkpoint format: {path}")
+    return {
+        key.removeprefix("module."): value
+        for key, value in checkpoint.items()
+    }
+
+
+def _imagenet_teacher_checkpoint(model_name):
+    configured = getattr(cfg.DISTILLER, "TEACHER_CHECKPOINT", "")
+    if configured:
+        return configured
+    filenames = {
+        "ResNet34": os.path.join("ResNet34_vanilla", "ckpt_epoch_90.pth"),
+        "ResNet50": os.path.join("ResNet50_vanilla", "ckpt_epoch_90.pth"),
+    }
+    filename = filenames.get(model_name)
+    if filename is None:
+        raise ValueError(
+            f"No local ImageNet checkpoint mapping for teacher {model_name}; "
+            "set DISTILLER.TEACHER_CHECKPOINT explicitly."
+        )
+    return os.path.join("download_ckpts", "imagenet_teachers", filename)
 
 
 def main(cfg, resume, opts):
@@ -57,8 +102,10 @@ def main(cfg, resume, opts):
     else:
         print(log_msg("Loading teacher model", "INFO"))
         if cfg.DATASET.TYPE == "imagenet":
-            model_teacher = imagenet_model_dict[cfg.DISTILLER.TEACHER](
-                pretrained=True)  # imagenet_model_dict[ResNet32](pretrained=True)
+            teacher_name = cfg.DISTILLER.TEACHER
+            model_teacher = imagenet_model_dict[teacher_name](pretrained=False)
+            checkpoint = _imagenet_teacher_checkpoint(teacher_name)
+            model_teacher.load_state_dict(_load_local_state_dict(checkpoint), strict=True)
             model_student = imagenet_model_dict[cfg.DISTILLER.STUDENT](pretrained=False)
         elif cfg.DATASET.TYPE.startswith("tinyimagenet200"):
             if cfg.DISTILLER.TEACHER == 'deit':
@@ -148,7 +195,7 @@ if __name__ == "__main__":
     parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
-    cfg.merge_from_file(args.cfg)
+    merge_cfg_from_file(cfg, args.cfg)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     main(cfg, args.resume, args.opts)

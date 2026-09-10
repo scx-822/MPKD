@@ -2,6 +2,8 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld,res56,res20"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD"
+  BASELINE: ""
 DISTILLER:
   TYPE: "CRLD"
   TEACHER: "resnet56"

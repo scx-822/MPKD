@@ -2,10 +2,19 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,res50,mv2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
+
+DATASET:
+  NUM_WORKERS: 0
+  TEST:
+    BATCH_SIZE: 64
+
 DISTILLER:
   TYPE: "CRLD_Proto"
   TEACHER: "ResNet50"
   STUDENT: "MobileNetV2"
+
 SOLVER:
   BATCH_SIZE: 64
   EPOCHS: 240
@@ -16,10 +25,16 @@ SOLVER:
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
-# <--- 加上这个块，确保参数传递正确
+
 CRLD:
+  # 当前正式最好 71.68% 对应 PROTO_TAU_W=0.75。本轮仅提高到
+  # 0.80，优先提高弱视图原型纯度；未提升时自动恢复 0.75。
   TEMPERATURE: 3.0
-  WARMUP: 20
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 1.0
+  CV_WEIGHT: 0.25
+  TAU_W: 0.8
+  TAU_S: 0.5
+  PROTO_TEMP: 0.50
+  PROTO_TAU_W: 0.75
+  PROTO_K: 3

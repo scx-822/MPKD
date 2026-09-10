@@ -1,7 +1,9 @@
 EXPERIMENT:
   NAME: ""
-  TAG: "CRLD,res34,res18"
+  TAG: "crld,res50,mobilenetv1"
   PROJECT: "imagenet_baselines"
+  METHOD: "CRLD"
+  BASELINE: ""
 DATASET:
   TYPE: "imagenet"
   NUM_WORKERS: 32
@@ -11,6 +13,7 @@ DISTILLER:
   TYPE: "CRLD"
   TEACHER: "ResNet50"
   STUDENT: "MobileNetV1"
+  TEACHER_CHECKPOINT: "download_ckpts/imagenet_teachers/ResNet50_vanilla/ckpt_epoch_90.pth"
 SOLVER:
   BATCH_SIZE: 512
   EPOCHS: 100

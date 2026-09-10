@@ -1,0 +1,223 @@
+"""Run the controlled CIFAR-100 CRLD-Proto ablations sequentially."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RESULTS_PATH = ROOT / "experiments" / "ABLATION_RESULTS.md"
+LOG_PATH = ROOT / "experiments" / "log.md"
+LOG_START = "<!-- CIFAR100_ABLATION_RESULTS_START -->"
+LOG_END = "<!-- CIFAR100_ABLATION_RESULTS_END -->"
+DEFAULT_CONFIG = Path("configs/cifar100/crld_proto/res32x4_res8x4.yaml")
+MODE_GROUPS = {
+    "ae": ["A", "B", "C", "D", "E"],
+    # A and B already disable GLVQ. Reuse those completed results and run
+    # only the new isolated D/E variants below.
+    "noglvq": ["D_no_glvq", "E_no_glvq"],
+    "gates": [
+        "gate_no_uncertainty",
+        "gate_no_agreement",
+        "gate_no_positive_gain",
+        "gate_no_confidence",
+    ],
+}
+MODE_TAGS = {
+    "A": "ablation_a",
+    "B": "ablation_b",
+    "C": "ablation_c",
+    "D": "ablation_d",
+    "E": "ablation_e",
+    "D_no_glvq": "ablation_d_no_glvq",
+    "E_no_glvq": "ablation_e_no_glvq",
+    "gate_no_uncertainty": "gate_no_uncertainty",
+    "gate_no_agreement": "gate_no_agreement",
+    "gate_no_positive_gain": "gate_no_positive_gain",
+    "gate_no_confidence": "gate_no_confidence",
+}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run A-E or gate ablations one at a time on a single GPU."
+    )
+    parser.add_argument("--phase", choices=["ae", "noglvq", "gates"], default="ae")
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=list(MODE_TAGS),
+        help="Optional explicit mode list; overrides --phase.",
+    )
+    parser.add_argument("--cfg", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run even when the isolated worklog already contains best_acc.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print commands and output paths without starting training.",
+    )
+    return parser.parse_args()
+
+
+def load_config(path: Path):
+    with path.open("r", encoding="utf-8-sig") as stream:
+        return yaml.safe_load(stream)
+
+
+def output_path(config, mode):
+    experiment = config["EXPERIMENT"]
+    base_name = experiment.get("NAME") or experiment["TAG"]
+    run_name = f"{base_name},{MODE_TAGS[mode]}"
+    return ROOT / "output" / experiment["PROJECT"] / run_name / "worklog.txt"
+
+
+def has_completed_result(worklog: Path):
+    if not worklog.is_file():
+        return False
+    text = worklog.read_text(encoding="utf-8", errors="ignore")
+    return re.search(r"(?m)^best_acc\s+[0-9]+(?:\.[0-9]+)?\s*$", text) is not None
+
+
+def parse_completed_result(worklog: Path, mode: str):
+    text = worklog.read_text(encoding="utf-8", errors="ignore")
+    metadata_index = text.rfind(f"ablation_mode: {mode}")
+    if metadata_index >= 0:
+        text = text[metadata_index:]
+
+    best_matches = re.findall(
+        r"(?m)^best_acc\s+([0-9]+(?:\.[0-9]+)?)\s*$", text
+    )
+    epoch_matches = re.findall(
+        r"epoch:\s*(\d+)(?:(?!epoch:).)*?test_acc:\s*"
+        r"([0-9]+(?:\.[0-9]+)?)",
+        text,
+        flags=re.DOTALL,
+    )
+    if not best_matches or not epoch_matches:
+        raise RuntimeError(f"Incomplete ablation worklog: {worklog}")
+
+    best_acc = float(best_matches[-1])
+    epochs = [(int(epoch), float(acc)) for epoch, acc in epoch_matches]
+    best_epoch, _ = max(epochs, key=lambda item: item[1])
+    final_epoch, final_acc = epochs[-1]
+    return {
+        "best_acc": best_acc,
+        "best_epoch": best_epoch,
+        "final_epoch": final_epoch,
+        "final_acc": final_acc,
+    }
+
+
+def update_markdown_row(markdown: str, mode: str, result: dict):
+    pattern = re.compile(rf"(?m)^\|\s*{re.escape(mode)}\s*\|.*$")
+    match = pattern.search(markdown)
+    if match is None:
+        raise RuntimeError(f"Result table row not found for mode {mode}")
+
+    cells = [cell.strip() for cell in match.group(0).split("|")]
+    if len(cells) != 9:
+        raise RuntimeError(f"Unexpected result row format for mode {mode}")
+    cells[4] = f"{result['best_acc']:.2f}%"
+    cells[5] = str(result["best_epoch"])
+    cells[6] = f"{result['final_acc']:.2f}%"
+    cells[7] = "已完成"
+    replacement = "| " + " | ".join(cells[1:-1]) + " |"
+    return markdown[:match.start()] + replacement + markdown[match.end():]
+
+
+def sync_log_summary(results_markdown: str):
+    body = results_markdown.split("\n", 1)[1].lstrip()
+    section = (
+        f"{LOG_START}\n"
+        "## 7. CIFAR-100 消融实验\n\n"
+        "> 此节由 `tools/run_cifar100_ablations.py` 根据独立 "
+        "`worklog.txt` 自动同步。\n\n"
+        f"{body.rstrip()}\n{LOG_END}"
+    )
+    rendered = "".join(section)
+    log_text = LOG_PATH.read_text(encoding="utf-8")
+    if LOG_START in log_text and LOG_END in log_text:
+        start = log_text.index(LOG_START)
+        end = log_text.index(LOG_END, start) + len(LOG_END)
+        log_text = log_text[:start] + rendered + log_text[end:]
+    else:
+        log_text = log_text.rstrip() + "\n\n" + rendered + "\n"
+    LOG_PATH.write_text(log_text, encoding="utf-8")
+
+
+def record_completed_result(worklog: Path, mode: str):
+    result = parse_completed_result(worklog, mode)
+    markdown = RESULTS_PATH.read_text(encoding="utf-8")
+    markdown = update_markdown_row(markdown, mode, result)
+    RESULTS_PATH.write_text(markdown, encoding="utf-8")
+    sync_log_summary(markdown)
+    print(
+        f"recorded: best={result['best_acc']:.2f}% at epoch "
+        f"{result['best_epoch']}, final={result['final_acc']:.2f}%"
+    )
+
+
+def main():
+    args = parse_args()
+    config_path = args.cfg if args.cfg.is_absolute() else ROOT / args.cfg
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Configuration not found: {config_path}")
+
+    config = load_config(config_path)
+    modes = args.modes or MODE_GROUPS[args.phase]
+    relative_config = config_path.relative_to(ROOT)
+
+    print(f"Ablation config: {relative_config}")
+    print(f"Seed: {args.seed}")
+    print(f"Modes: {', '.join(modes)}")
+
+    for index, mode in enumerate(modes, start=1):
+        worklog = output_path(config, mode)
+        command = [
+            sys.executable,
+            "tools/train_proto.py",
+            "--cfg",
+            str(relative_config),
+            "--seed",
+            str(args.seed),
+            "--ablation-mode",
+            mode,
+        ]
+        print(f"\n[{index}/{len(modes)}] mode={mode}")
+        print(f"output: {worklog.relative_to(ROOT)}")
+        print("command:", subprocess.list2cmdline(command))
+
+        if has_completed_result(worklog) and not args.force:
+            record_completed_result(worklog, mode)
+            print("status: skipped (completed best_acc found; use --force to rerun)")
+            continue
+        if args.dry_run:
+            print("status: dry-run")
+            continue
+
+        result = subprocess.run(command, cwd=ROOT)
+        if result.returncode != 0:
+            raise SystemExit(
+                f"Ablation {mode} failed with exit code {result.returncode}."
+            )
+        if not has_completed_result(worklog):
+            raise RuntimeError(
+                f"Ablation {mode} ended without a best_acc record: {worklog}"
+            )
+        record_completed_result(worklog, mode)
+        print("status: completed")
+
+
+if __name__ == "__main__":
+    main()

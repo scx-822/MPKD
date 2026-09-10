@@ -1,0 +1,44 @@
+EXPERIMENT:
+  NAME: ""
+  TAG: "crld_proto,res34,res18"
+  PROJECT: "imagenet_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
+
+DATASET:
+  TYPE: "imagenet"
+  NUM_WORKERS: 4
+  TEST:
+    BATCH_SIZE: 64
+
+DISTILLER:
+  TYPE: "CRLD_Proto"
+  TEACHER: "ResNet34"
+  STUDENT: "ResNet18"
+  TEACHER_CHECKPOINT: "download_ckpts/imagenet_teachers/ResNet34_vanilla/ckpt_epoch_90.pth"
+
+SOLVER:
+  # Micro-batch 32 with accumulation gives an effective batch size of 512.
+  BATCH_SIZE: 32
+  GRAD_ACCUM_STEPS: 16
+  EPOCHS: 100
+  LR: 0.2
+  LR_DECAY_STAGES: [30, 60, 90]
+  LR_DECAY_RATE: 0.1
+  WEIGHT_DECAY: 0.0001
+  MOMENTUM: 0.9
+  TYPE: "SGD"
+  TRAINER: "crld"
+
+CRLD:
+  TEMPERATURE: 1.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 2.0
+  CV_WEIGHT: 0.5
+  TAU_W: 0.9
+  TAU_S: 0.2
+  PROTO_TEMP: 0.2
+  PROTO_TAU_W: 0.8
+  PROTO_K: 3
+  PROTO_GLVQ_EPOCHS: 30
+  PROTO_MAX_SAMPLES_PER_CLASS: 200

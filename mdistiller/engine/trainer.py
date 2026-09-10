@@ -98,6 +98,7 @@ class BaseTrainer(object):
             "top1": AverageMeter(),
             "top5": AverageMeter(),
         }
+        self.begin_train_epoch()
         num_iter = len(self.train_loader)
         pbar = tqdm(range(num_iter))
 
@@ -108,6 +109,7 @@ class BaseTrainer(object):
             pbar.set_description(log_msg(msg, "TRAIN"))
             pbar.update()
         pbar.close()
+        self.end_train_epoch()
 
         # validate
         test_acc, test_acc_top5, test_loss = validate(self.val_loader, self.distiller)
@@ -149,6 +151,12 @@ class BaseTrainer(object):
             save_checkpoint(
                 student_state, os.path.join(self.log_path, "student_best")
             )
+
+    def begin_train_epoch(self):
+        pass
+
+    def end_train_epoch(self):
+        pass
 
     def train_iter(self, data, epoch, train_meters):
         self.optimizer.zero_grad()
@@ -267,8 +275,18 @@ class AugTrainer(BaseTrainer):
         return msg
 
 class CRLDTrainer(BaseTrainer):
-    def train_iter(self, data, epoch, train_meters):
+    def begin_train_epoch(self):
+        self.grad_accum_steps = max(1, int(getattr(self.cfg.SOLVER, "GRAD_ACCUM_STEPS", 1)))
+        self.grad_accum_count = 0
         self.optimizer.zero_grad()
+
+    def end_train_epoch(self):
+        if getattr(self, "grad_accum_count", 0) > 0:
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.grad_accum_count = 0
+
+    def train_iter(self, data, epoch, train_meters):
         torch.cuda.reset_peak_memory_stats(device='cuda')
         train_start_time = time.time()
         image, target, index = data
@@ -286,8 +304,12 @@ class CRLDTrainer(BaseTrainer):
 
         # backward
         loss = sum([l.mean() for l in losses_dict.values()])
-        loss.backward()
-        self.optimizer.step()
+        (loss / self.grad_accum_steps).backward()
+        self.grad_accum_count += 1
+        if self.grad_accum_count >= self.grad_accum_steps:
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.grad_accum_count = 0
         train_meters["training_time"].update(time.time() - train_start_time)
         train_meters["mem"].update(torch.cuda.max_memory_allocated(device='cuda') / (1024 ** 2))
         # collect info

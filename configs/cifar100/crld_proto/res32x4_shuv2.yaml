@@ -2,24 +2,39 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,res32x4,shuv2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
+
+DATASET:
+  NUM_WORKERS: 0
+  TEST:
+    BATCH_SIZE: 64
+
 DISTILLER:
   TYPE: "CRLD_Proto"
   TEACHER: "resnet32x4"
   STUDENT: "ShuffleV2"
+
 SOLVER:
   BATCH_SIZE: 64
   EPOCHS: 240
-  LR: 0.01 
+  LR: 0.01
   LR_DECAY_STAGES: [150, 180, 210]
   LR_DECAY_RATE: 0.1
   WEIGHT_DECAY: 0.0005
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
-# <--- 加上这个块，确保参数传递正确
+
 CRLD:
-  TEMPERATURE: 3.0
-  WARMUP: 20
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  # 当前正式最好 78.96% 对应 PROTO_TEMP=0.10。0.15 复验为
+  # 78.71%，未刷新历史最好，继续保留 0.10。
+  TEMPERATURE: 4.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 2.0
+  CV_WEIGHT: 0.5
+  TAU_W: 0.9
+  TAU_S: 0.3
+  PROTO_TEMP: 0.10
+  PROTO_TAU_W: 0.80
+  PROTO_K: 3

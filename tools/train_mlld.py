@@ -10,7 +10,7 @@ from mdistiller.models import cifar_model_dict, imagenet_model_dict, tinyimagene
 from mdistiller.distillers import distiller_dict
 from mdistiller.dataset import get_dataset_strong
 from mdistiller.engine.utils import load_checkpoint, log_msg
-from mdistiller.engine.cfg import CFG as cfg
+from mdistiller.engine.cfg import CFG as cfg, merge_cfg_from_file
 from mdistiller.engine.cfg import show_cfg
 from mdistiller.engine import trainer_dict
 
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
-    cfg.merge_from_file(args.cfg)
+    merge_cfg_from_file(cfg, args.cfg)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     main(cfg, args.resume, args.opts)

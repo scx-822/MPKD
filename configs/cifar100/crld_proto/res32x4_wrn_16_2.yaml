@@ -2,10 +2,19 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,res32x4,wrn_16_2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD-Proto"
+  BASELINE: "CRLD"
+
+DATASET:
+  NUM_WORKERS: 0
+  TEST:
+    BATCH_SIZE: 64
+
 DISTILLER:
   TYPE: "CRLD_Proto"
   TEACHER: "resnet32x4"
   STUDENT: "wrn_16_2"
+
 SOLVER:
   BATCH_SIZE: 64
   EPOCHS: 240
@@ -16,10 +25,17 @@ SOLVER:
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
-# <--- 加上这个块，确保参数传递正确
+
 CRLD:
-  TEMPERATURE: 3.0
-  WARMUP: 20
-  LOSS:
-    CE_WEIGHT: 1.0
-    KD_WEIGHT: 1.0
+  # 当前正式最好 76.95% 对应 PROTO_TEMP=0.10。0.15 候选此前仅
+  # 运行 97 epoch，前期曲线与 0.10 基本持平，本轮从头完整复验；
+  # 未刷新 76.95% 时由批量脚本自动恢复 0.10。
+  TEMPERATURE: 4.0
+  CE_WEIGHT: 1.0
+  WV_WEIGHT: 2.0
+  CV_WEIGHT: 0.5
+  TAU_W: 0.9
+  TAU_S: 0.3
+  PROTO_TEMP: 0.15
+  PROTO_TAU_W: 0.80
+  PROTO_K: 3

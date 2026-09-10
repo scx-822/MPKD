@@ -2,6 +2,8 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld,vgg13,mv2"
   PROJECT: "cifar100_baselines"
+  METHOD: "CRLD"
+  BASELINE: ""
 DISTILLER:
   TYPE: "CRLD"
   TEACHER: "vgg13"
@@ -16,4 +18,3 @@ SOLVER:
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
-

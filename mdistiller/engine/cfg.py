@@ -2,6 +2,12 @@ from yacs.config import CfgNode as CN
 from .utils import log_msg
 
 
+def merge_cfg_from_file(cfg, filename):
+    """Merge a UTF-8 YAML file without depending on the Windows locale."""
+    with open(filename, "r", encoding="utf-8-sig") as stream:
+        cfg.merge_from_other_cfg(CN.load_cfg(stream))
+
+
 def show_cfg(cfg):
     dump_cfg = CN()
     dump_cfg.EXPERIMENT = cfg.EXPERIMENT
@@ -9,8 +15,11 @@ def show_cfg(cfg):
     dump_cfg.DISTILLER = cfg.DISTILLER
     dump_cfg.SOLVER = cfg.SOLVER
     dump_cfg.LOG = cfg.LOG
-    if cfg.DISTILLER.TYPE in cfg:
-        dump_cfg.update({cfg.DISTILLER.TYPE: cfg.get(cfg.DISTILLER.TYPE)})
+    method_cfg_key = (
+        "CRLD" if cfg.DISTILLER.TYPE == "CRLD_Proto" else cfg.DISTILLER.TYPE
+    )
+    if method_cfg_key in cfg:
+        dump_cfg.update({method_cfg_key: cfg.get(method_cfg_key)})
     print(log_msg("CONFIG:\n{}".format(dump_cfg.dump()), "INFO"))
 
 
@@ -21,6 +30,8 @@ CFG.EXPERIMENT = CN()
 CFG.EXPERIMENT.PROJECT = "distill"
 CFG.EXPERIMENT.NAME = ""
 CFG.EXPERIMENT.TAG = "default"
+CFG.EXPERIMENT.METHOD = ""
+CFG.EXPERIMENT.BASELINE = ""
 
 # Dataset
 CFG.DATASET = CN()
@@ -34,6 +45,7 @@ CFG.DISTILLER = CN()
 CFG.DISTILLER.TYPE = "NONE"  # Vanilla as default
 CFG.DISTILLER.TEACHER = "ResNet50"
 CFG.DISTILLER.STUDENT = "resnet32"
+CFG.DISTILLER.TEACHER_CHECKPOINT = ""
 
 # Solver
 CFG.SOLVER = CN()
@@ -46,6 +58,7 @@ CFG.SOLVER.LR_DECAY_RATE = 0.1
 CFG.SOLVER.WEIGHT_DECAY = 0.0001
 CFG.SOLVER.MOMENTUM = 0.9
 CFG.SOLVER.TYPE = "SGD"
+CFG.SOLVER.GRAD_ACCUM_STEPS = 1
 
 # Log
 CFG.LOG = CN()
@@ -198,3 +211,17 @@ CFG.CRLD.CV_WEIGHT = 0.5
 CFG.CRLD.TEMPERATURE = 4.0
 CFG.CRLD.TAU_W = 0.9
 CFG.CRLD.TAU_S = 0.2
+CFG.CRLD.PROTO_K = 3
+CFG.CRLD.PROTO_TEMP = 0.5
+CFG.CRLD.PROTO_FUSION_SCALE = 0.5
+CFG.CRLD.PROTO_TAU_W = 0.8
+CFG.CRLD.PROTO_GLVQ_EPOCHS = 100
+CFG.CRLD.PROTO_MAX_SAMPLES_PER_CLASS = 0
+# Ablation controls. The defaults reproduce the complete CRLD-Proto method.
+CFG.CRLD.PROTO_ENABLED = True
+CFG.CRLD.PROTO_USE_GLVQ = True
+CFG.CRLD.PROTO_FUSION_MODE = "gated"
+CFG.CRLD.PROTO_GATE_UNCERTAINTY = True
+CFG.CRLD.PROTO_GATE_AGREEMENT = True
+CFG.CRLD.PROTO_GATE_POSITIVE_GAIN = True
+CFG.CRLD.PROTO_GATE_CONFIDENCE = True

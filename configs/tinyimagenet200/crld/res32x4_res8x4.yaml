@@ -2,6 +2,8 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld,res32x4,res8x4"
   PROJECT: "tinyimagenet200_baselines"
+  METHOD: "CRLD"
+  BASELINE: ""
 DATASET:
   TYPE: "tinyimagenet200"
   NUM_WORKERS: 8

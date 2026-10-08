@@ -18,9 +18,9 @@ DISTILLER:
   TEACHER_CHECKPOINT: "download_ckpts/imagenet_teachers/ResNet34_vanilla/ckpt_epoch_90.pth"
 
 SOLVER:
-  # Micro-batch 32 with accumulation gives an effective batch size of 512.
-  BATCH_SIZE: 32
-  GRAD_ACCUM_STEPS: 16
+  # 8 GB GPU: micro-batch 16 with accumulation gives an effective batch size of 512.
+  BATCH_SIZE: 16
+  GRAD_ACCUM_STEPS: 32
   EPOCHS: 100
   LR: 0.2
   LR_DECAY_STAGES: [30, 60, 90]
@@ -40,5 +40,4 @@ CRLD:
   PROTO_TEMP: 0.2
   PROTO_TAU_W: 0.8
   PROTO_K: 3
-  PROTO_GLVQ_EPOCHS: 30
   PROTO_MAX_SAMPLES_PER_CLASS: 200

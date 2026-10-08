@@ -12,16 +12,15 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS_PATH = ROOT / "experiments" / "ABLATION_RESULTS.md"
+RESULTS_PATH = ROOT / "experiments" / "RESULTS.md"
 LOG_PATH = ROOT / "experiments" / "log.md"
+RESULTS_START = "<!-- ABLATION_RESULTS_START -->"
+RESULTS_END = "<!-- ABLATION_RESULTS_END -->"
 LOG_START = "<!-- CIFAR100_ABLATION_RESULTS_START -->"
 LOG_END = "<!-- CIFAR100_ABLATION_RESULTS_END -->"
 DEFAULT_CONFIG = Path("configs/cifar100/crld_proto/res32x4_res8x4.yaml")
 MODE_GROUPS = {
     "ae": ["A", "B", "C", "D", "E"],
-    # A and B already disable GLVQ. Reuse those completed results and run
-    # only the new isolated D/E variants below.
-    "noglvq": ["D_no_glvq", "E_no_glvq"],
     "gates": [
         "gate_no_uncertainty",
         "gate_no_agreement",
@@ -35,8 +34,6 @@ MODE_TAGS = {
     "C": "ablation_c",
     "D": "ablation_d",
     "E": "ablation_e",
-    "D_no_glvq": "ablation_d_no_glvq",
-    "E_no_glvq": "ablation_e_no_glvq",
     "gate_no_uncertainty": "gate_no_uncertainty",
     "gate_no_agreement": "gate_no_agreement",
     "gate_no_positive_gain": "gate_no_positive_gain",
@@ -48,7 +45,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Run A-E or gate ablations one at a time on a single GPU."
     )
-    parser.add_argument("--phase", choices=["ae", "noglvq", "gates"], default="ae")
+    parser.add_argument("--phase", choices=["ae", "gates"], default="ae")
     parser.add_argument(
         "--modes",
         nargs="+",
@@ -137,13 +134,17 @@ def update_markdown_row(markdown: str, mode: str, result: dict):
 
 
 def sync_log_summary(results_markdown: str):
-    body = results_markdown.split("\n", 1)[1].lstrip()
+    if RESULTS_START not in results_markdown or RESULTS_END not in results_markdown:
+        raise RuntimeError("RESULTS.md 缺少消融结果标记")
+    start = results_markdown.index(RESULTS_START) + len(RESULTS_START)
+    end = results_markdown.index(RESULTS_END, start)
+    body = results_markdown[start:end].strip()
     section = (
         f"{LOG_START}\n"
         "## 7. CIFAR-100 消融实验\n\n"
         "> 此节由 `tools/run_cifar100_ablations.py` 根据独立 "
         "`worklog.txt` 自动同步。\n\n"
-        f"{body.rstrip()}\n{LOG_END}"
+        f"{body}\n{LOG_END}"
     )
     rendered = "".join(section)
     log_text = LOG_PATH.read_text(encoding="utf-8")
@@ -199,7 +200,8 @@ def main():
         print("command:", subprocess.list2cmdline(command))
 
         if has_completed_result(worklog) and not args.force:
-            record_completed_result(worklog, mode)
+            if not args.dry_run:
+                record_completed_result(worklog, mode)
             print("status: skipped (completed best_acc found; use --force to rerun)")
             continue
         if args.dry_run:

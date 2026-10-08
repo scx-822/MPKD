@@ -1,279 +1,158 @@
-# CRLD-Proto: 基于多中心原型先验的强增强鲁棒知识蒸馏
+# CRLD-Proto / MPKD
 
-本项目在 CRLD（Cross-View Consistency Regularisation for Knowledge Distillation）的基础上，引入 **GLVQ 多中心类别原型**，用于修正教师模型在强增强视图下产生的不可靠软标签。
+本项目基于 `mdistiller`，实现并复现知识蒸馏、跨视图蒸馏以及多中心原型目标修正实验。
 
-方法关系必须明确区分：**CRLD 是原始文献基线，CRLD-Proto 是本文在完整 CRLD 损失结构上加入原型修正后的方法**。配置中的 Python 标识 `CRLD_Proto` 仅因类名不能使用连字符；论文、日志和结果表统一显示为 `CRLD-Proto`。
+## 项目简介
 
-核心目标是解决以下问题：
+- `CRLD`：原始论文中的 Cross-View Consistency Regularisation 基线。
+- `CRLD-Proto`：在完整 CRLD 损失上增加多中心原型修正，只替换教师强视图同视图蒸馏目标。
+- `MPKD`：将同一原型修正模块适配到 `KD`、`DKD` 和 `NKD` 的兼容入口。
+- 原始 `KD`、`DKD`、`NKD`、`CRLD` 训练入口均保留，互不覆盖。
 
-> 在知识蒸馏中，教师模型面对强增强数据时会产生不可靠预测，严重影响一致性正则化的有效性。弱增强视图通常保持较高预测可靠性，因此可以利用弱视图构建纯净类别先验，对强视图教师目标进行动态修正。
+当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心，不使用 GLVQ。论文草稿和逐轮实验记录位于 `experiments/`。
 
-## 方法概述
-
-当前实验方案为：
-
-```text
-K-Means 多中心暖启动
-+ GLVQ 原型判别式微调
-+ log-sum-exp 多原型相似度融合
-+ 强视图不确定性动态权重
-+ 概率级原型先验融合
-```
-
-### 1. 原型构建
-
-使用教师模型提取弱增强视图特征，仅保留满足以下条件的样本参与原型构建：
+## 目录结构
 
 ```text
-1. 教师弱视图预测置信度 >= PROTO_TAU_W
-2. 教师弱视图预测类别 = 真实类别
+configs/                 训练配置
+mdistiller/              数据集、模型、蒸馏器和训练引擎
+tools/train.py           原始单视图蒸馏训练入口
+tools/train_proto.py     CRLD-Proto 与 MPKD 训练入口
+tools/run_*.py           批量实验编排脚本
+tools/eval.py            单模型评估
+tools/prepare_experiments.py  数据和教师权重检查
+experiments/             协议、结果、日志和论文材料
+data/                    数据集（本地，不提交）
+download_ckpts/          教师权重（本地，不提交）
+output/                  训练输出（本地，不提交）
 ```
 
-每个类别构建 `K=3` 个子原型：
-
-```text
-K-Means 初始化 -> GLVQ 离线微调 -> L2 归一化
-```
-
-### 2. 强视图原型先验
-
-训练阶段，使用教师强视图特征与每类多个子原型计算余弦相似度，并通过 log-sum-exp 得到类别级原型 logit：
-
-```text
-g_{i,c} = log(1/K * sum_k exp(cos(f_s^T, p_{c,k}) / tau_p))
-```
-
-随后通过 Softmax 得到类别级原型先验分布：
-
-```text
-q_i = Softmax(g_i)
-```
-
-### 3. 动态融合权重
-
-当前版本使用教师强视图预测熵计算动态原型融合权重：
-
-```text
-lambda_i = H(p_s^T) / log(C)
-```
-
-最终强视图教师目标分布为：
-
-```text
-p_bar_s^T = (1 - lambda_i) * p_s^T + lambda_i * q_i
-```
-
-也就是说，教师在强视图下越不确定，原型先验的修正权重越高。
-
-## 主要代码
-
-```text
-tools/train_proto.py
-```
-
-关键模块：
-
-| 函数 / 类 | 作用 |
-| --- | --- |
-| `precompute_multicenter_glvq_prototypes` | 训练前构建 K-Means + GLVQ 多中心原型 |
-| `evaluate_prototypes_nk` | 评估多中心原型最近中心分类准确率 |
-| `CRLD_Proto._prototype_logits` | 计算强视图教师特征与原型的类别级 logit |
-| `CRLD_Proto.forward_train` | 执行原型先验融合并计算 CE / KD 损失 |
-
-## 实验配置
-
-### ResNet32x4 -> ResNet8x4
-
-当前默认实验配置：
-
-```text
-configs/cifar100/crld_proto/res32x4_res8x4.yaml
-```
-
-关键参数：
-
-| 参数 | 当前值 | 说明 |
-| --- | ---: | --- |
-| `TEACHER` | `resnet32x4` | 教师模型 |
-| `STUDENT` | `resnet8x4` | 学生模型 |
-| `TEMPERATURE` | 4.0 | 蒸馏温度 |
-| `TAU_W` | 0.8 | 训练阶段弱视图 KD mask 阈值 |
-| `PROTO_TAU_W` | 0.80 | 原型构建阶段弱视图筛选阈值 |
-| `PROTO_TEMP` | 0.5 | 原型相似度温度 |
-| `PROTO_MIN_WEIGHT` | 0.0 | 原型融合权重下限 |
-| `PROTO_MAX_WEIGHT` | 1.0 | 原型融合权重上限 |
-
-输出目录：
-
-```text
-output/cifar100_baselines/crld_proto,res32x4,res8x4
-```
-
-### ResNet56 -> ResNet20
-
-稳定对照配置：
-
-```text
-configs/cifar100/crld_proto/res56_res20.yaml
-```
-
-该配置运行 CRLD-Proto，而不是重新定义 CRLD 基线：
-
-```text
-GLVQ 多中心原型 + log-sum-exp + 概率级原型先验融合
-```
-
-历史削弱结构记录（仅供追溯，不作为当前 CRLD-Proto 正式结果）：
-
-```text
-historical reduced-CRLD result: best_acc = 72.15
-```
-
-当前 `tools/train_proto.py` 保留完整 CRLD 的监督损失、同视图蒸馏和交叉视图蒸馏，
-仅将教师强视图同视图目标替换为可靠性门控的原型修正目标。因此，基线方法写作
-`CRLD`，本文实验方法写作 `CRLD-Proto`，二者不能混写。
-
-输出目录：
-
-```text
-output/cifar100_baselines/crld_proto,res56,res20
-```
-
-## 运行方法
-
-### 1. 环境安装
+## 环境准备
 
 ```powershell
 pip install -r requirements.txt
 pip install -e .
-```
-
-### 2. 准备数据和教师模型
-
-由于 GitHub 不适合存放大文件，本仓库不会上传以下目录：
-
-```text
-data/
-download_ckpts/
-output/
-```
-
-本工作区已经准备好 CIFAR-100、Tiny-ImageNet-200、6 个 CIFAR 教师权重、本地训练的 Tiny-ImageNet ResNet32x4 教师权重，以及 ImageNet ResNet34/ResNet50 官方教师权重。资源状态和 SHA-256 信息见：
-
-```text
-experiments/resources_manifest.json
-```
-
-如需重新检查或在另一台机器复现公开资源准备流程：
-
-```powershell
 python tools/prepare_experiments.py
-python tools/prepare_experiments.py --prepare-public
 ```
 
-目前仍需用户提供的资源只有遵守许可获取的 ImageNet 原始数据。当前实验顺序、CIFAR-100 A-E/门控消融以及跨数据集安排见：
-
-```text
-experiments/RUN_ORDER.md
-experiments/EXPERIMENT_MATRIX.md
-experiments/ABLATION_RESULTS.md
-experiments/COMPATIBILITY_PROTOCOL.md
-```
-
-第一阶段先检查 A-E 消融将使用的命令和独立输出目录：
-
-```powershell
-python tools/run_cifar100_ablations.py --phase ae --dry-run
-```
-
-确认无误后，按 A、B、C、D、E 顺序执行：
-
-```powershell
-python tools/run_cifar100_ablations.py --phase ae
-```
-
-每组结果分别写入带 `ablation_a` 至 `ablation_e` 后缀的目录，不会覆盖正式 CRLD-Proto 的输出。门控因子消融和 KD/DKD/NKD 兼容性实验排在 A-E 之后，具体定义以实验协议为准。
-
-ImageNet 数据必须整理为：
+脚本会检查 CIFAR-100、Tiny-ImageNet 和教师权重状态。ImageNet 原始数据受许可限制，需要用户自行准备。目录应为：
 
 ```text
 data/imagenet/train/<class>/*.JPEG
 data/imagenet/val/<class>/*.JPEG
 ```
 
-### 3. 训练当前实验
+资源清单会写入 `experiments/resources_manifest.json`。数据集和权重不会被提交到 Git。
+
+## 常用运行命令
+
+### 原始蒸馏入口
 
 ```powershell
-python tools/train_proto.py --cfg configs/cifar100/crld_proto/res32x4_res8x4.yaml
+# KD、DKD、NKD 或 CRLD 使用对应 YAML
+python tools/train.py --cfg configs/cifar100/kd/res32x4_res8x4.yaml
+python tools/train.py --cfg configs/cifar100/dkd/res32x4_res8x4.yaml
+python tools/train.py --cfg configs/cifar100/nkd/res32x4_res8x4.yaml
+python tools/train.py --cfg configs/cifar100/crld/res32x4_res8x4.yaml
 ```
 
-训练 ResNet56 -> ResNet20：
+### CRLD-Proto
 
 ```powershell
-python tools/train_proto.py --cfg configs/cifar100/crld_proto/res56_res20.yaml
+python tools/train_proto.py `
+  --cfg configs/cifar100/crld_proto/res32x4_res8x4.yaml `
+  --seed 42
 ```
 
-## 输出文件
+其他教师-学生架构只需替换 `--cfg` 路径，例如 `res56_res20.yaml` 或 `vgg13_vgg8.yaml`。
 
-训练结果默认保存在：
+### CIFAR-100 架构批量运行
+
+```powershell
+python tools/run_cifar100_architectures.py
+```
+
+该脚本保留原批量架构训练功能，正式入口名称已统一为英文；不再使用根目录下的中文脚本名。
+
+### A-E 与门控消融
+
+```powershell
+# 先查看命令，不启动训练
+python tools/run_cifar100_ablations.py --phase ae --dry-run
+
+# A-E
+python tools/run_cifar100_ablations.py --phase ae
+
+# 门控因子消融
+python tools/run_cifar100_ablations.py --phase gates
+```
+
+### MPKD 兼容实验
+
+```powershell
+# 查看 6 个架构 x 3 个方法的命令
+python tools/run_mpkd_compatibility.py --dry-run
+
+# 单组 1 epoch 冒烟测试
+python tools/run_mpkd_compatibility.py `
+  --architectures res32x4_res8x4 `
+  --methods KD `
+  --epochs 1
+
+# 正式运行兼容矩阵
+python tools/run_mpkd_compatibility.py --seed 42
+```
+
+### Tiny-ImageNet 与 ImageNet
+
+```powershell
+python tools/train_proto.py `
+  --cfg configs/tinyimagenet200/crld_proto/res32x4_res8x4.yaml `
+  --seed 42
+
+python tools/train_proto.py `
+  --cfg configs/imagenet/crld_proto/r34_r18.yaml `
+  --seed 42
+```
+
+显存不足时，优先在 YAML 中降低 `SOLVER.BATCH_SIZE`，并使用梯度累积；不要改变 `LR_DECAY_STAGES`，除非实验设计明确要求。
+
+### 评估、鲁棒性和论文导出
+
+```powershell
+python tools/eval.py --dataset cifar100 --model resnet8x4 --ckpt <checkpoint>
+python tools/evaluate_robustness.py --help
+python tools/export_paper_docx.py --help
+```
+
+## 输出与记录
+
+训练输出默认位于：
 
 ```text
-output/{PROJECT}/{TAG}
+output/<project>/<tag>/
 ```
 
-例如：
+每个实验目录中的 `worklog.txt` 是准确率和最佳轮次的原始依据。实验资料索引见 `experiments/README.md`，结构化结果见 `experiments/RESULTS.md`，详细历史记录见 `experiments/log.md`，实验协议和文件说明见 `experiments/PROTOCOL.md`。
 
-```text
-output/cifar100_baselines/crld_proto,res32x4,res8x4
-```
+`output/_archive/` 只存放 1 epoch 冒烟和未采用的调参候选，不参与正式结果汇总。
 
-常见输出：
+## 论文材料
 
-| 文件 | 说明 |
-| --- | --- |
-| `worklog.txt` | 训练日志，包含每个 epoch 的准确率和 loss |
-| `best` / `student_best` | 最佳模型权重 |
-| `latest` / `student_latest` | 最新模型权重 |
-| `train.events/` | TensorBoard 日志 |
+- `experiments/MPKD论文草稿.md`：中文论文草稿。
+- `experiments/MPKD论文草稿.docx`：Word 版本。
+- `experiments/CRLD-Proto写作结构分析.md`：写作结构参考。
+- `experiments/robustness/`：鲁棒性分析数据和图表。
 
-这些训练产物已经被 `.gitignore` 忽略，不会上传到 GitHub。
+## 引用
 
-## GitHub 上传说明
-
-仓库中已忽略大文件目录：
-
-```text
-data/
-download_ckpts/
-output/
-```
-
-如果后续需要分享模型权重，建议使用：
-
-```text
-1. GitHub Releases
-2. Git LFS
-3. 网盘链接
-```
-
-不要直接把 checkpoint、数据集、TensorBoard 日志提交到 Git。
-
-## 致谢
-
-本项目基于以下工作和代码框架修改：
-
-- CRLD: Cross-View Consistency Regularisation for Knowledge Distillation
-- mdistiller
-- NormKD
-- MLLD
-
-原始 CRLD 引用：
+本项目基于以下工作和代码框架：
 
 ```bibtex
 @inproceedings{crld,
-author = {Weijia Zhang and Dongnan Liu and Weidong Cai and Chao Ma},
-title = {Cross-View Consistency Regularisation for Knowledge Distillation},
-booktitle = {ACM MM},
-year = {2024}
+  author = {Weijia Zhang and Dongnan Liu and Weidong Cai and Chao Ma},
+  title = {Cross-View Consistency Regularisation for Knowledge Distillation},
+  booktitle = {ACM MM},
+  year = {2024}
 }
 ```

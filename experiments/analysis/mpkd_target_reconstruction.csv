@@ -1,0 +1,9 @@
+metric,value
+Raw strong-view teacher target Top-1,44.78
+Prototype distribution Top-1,44.73
+Gated reconstructed target Top-1,44.78
+Raw target true-class probability,7.083717194795608
+Reconstructed target true-class probability,7.087971550226212
+Rescue rate on raw-wrong samples,0.0
+Harm rate on raw-correct samples,0.0
+Mean fusion weight,0.0007857228154782206

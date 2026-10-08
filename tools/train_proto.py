@@ -15,7 +15,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from mdistiller.dataset import get_dataset_strong
@@ -36,12 +36,21 @@ from mdistiller.models import (
     tinyimagenet200_model_dict,
 )
 
-cudnn.benchmark = True
+# cuDNN benchmarking may select a convolution algorithm with a large
+# transient workspace on Windows, which can fail as HOST_ALLOCATION_FAILED
+# after a long run. Keep the stable setting by default and allow an explicit
+# opt-in for machines with enough memory.
+_cudnn_bool = lambda name, default=False: os.environ.get(
+    name, "1" if default else "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+cudnn.benchmark = _cudnn_bool("CRLD_CUDNN_BENCHMARK")
+cudnn.deterministic = _cudnn_bool("CRLD_CUDNN_DETERMINISTIC")
 
 
 DEFAULT_TRAINING_SEED = 42
 METHOD_DISPLAY_NAME = "CRLD-Proto"
 BASELINE_DISPLAY_NAME = "CRLD"
+PROTO_DISTILLER_TYPES = {"CRLD_Proto", "MPKD"}
 
 
 ABLATION_MODE_SPECS = {
@@ -49,7 +58,6 @@ ABLATION_MODE_SPECS = {
         "tag": "ablation_a",
         "description": "Complete CRLD without prototype correction.",
         "PROTO_ENABLED": False,
-        "PROTO_USE_GLVQ": False,
         "PROTO_FUSION_MODE": "fixed",
         "PROTO_GATE_UNCERTAINTY": False,
         "PROTO_GATE_AGREEMENT": False,
@@ -63,7 +71,6 @@ ABLATION_MODE_SPECS = {
             "unconditional fixed-weight fusion."
         ),
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": False,
         "PROTO_FUSION_MODE": "fixed",
         "PROTO_GATE_UNCERTAINTY": False,
         "PROTO_GATE_AGREEMENT": False,
@@ -72,59 +79,28 @@ ABLATION_MODE_SPECS = {
     },
     "C": {
         "tag": "ablation_c",
-        "description": "B plus discriminative GLVQ prototype optimization.",
+        "description": "B plus teacher strong-view uncertainty gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
-        "PROTO_FUSION_MODE": "fixed",
-        "PROTO_GATE_UNCERTAINTY": False,
+        "PROTO_FUSION_MODE": "gated",
+        "PROTO_GATE_UNCERTAINTY": True,
         "PROTO_GATE_AGREEMENT": False,
         "PROTO_GATE_POSITIVE_GAIN": False,
         "PROTO_GATE_CONFIDENCE": False,
     },
     "D": {
         "tag": "ablation_d",
-        "description": "C plus teacher strong-view uncertainty weighting.",
+        "description": "C plus class-agreement and positive-gain gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
-        "PROTO_GATE_AGREEMENT": False,
-        "PROTO_GATE_POSITIVE_GAIN": False,
+        "PROTO_GATE_AGREEMENT": True,
+        "PROTO_GATE_POSITIVE_GAIN": True,
         "PROTO_GATE_CONFIDENCE": False,
     },
     "E": {
         "tag": "ablation_e",
         "description": "Complete CRLD-Proto with all reliability gates.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
-        "PROTO_FUSION_MODE": "gated",
-        "PROTO_GATE_UNCERTAINTY": True,
-        "PROTO_GATE_AGREEMENT": True,
-        "PROTO_GATE_POSITIVE_GAIN": True,
-        "PROTO_GATE_CONFIDENCE": True,
-    },
-    "D_no_glvq": {
-        "tag": "ablation_d_no_glvq",
-        "description": (
-            "K-Means multi-center prototypes with uncertainty gating; "
-            "GLVQ is disabled."
-        ),
-        "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": False,
-        "PROTO_FUSION_MODE": "gated",
-        "PROTO_GATE_UNCERTAINTY": True,
-        "PROTO_GATE_AGREEMENT": False,
-        "PROTO_GATE_POSITIVE_GAIN": False,
-        "PROTO_GATE_CONFIDENCE": False,
-    },
-    "E_no_glvq": {
-        "tag": "ablation_e_no_glvq",
-        "description": (
-            "K-Means multi-center prototypes with all reliability gates; "
-            "GLVQ is disabled."
-        ),
-        "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": False,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
         "PROTO_GATE_AGREEMENT": True,
@@ -135,7 +111,6 @@ ABLATION_MODE_SPECS = {
         "tag": "gate_no_uncertainty",
         "description": "Complete CRLD-Proto without uncertainty gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": False,
         "PROTO_GATE_AGREEMENT": True,
@@ -146,7 +121,6 @@ ABLATION_MODE_SPECS = {
         "tag": "gate_no_agreement",
         "description": "Complete CRLD-Proto without class-agreement gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
         "PROTO_GATE_AGREEMENT": False,
@@ -157,7 +131,6 @@ ABLATION_MODE_SPECS = {
         "tag": "gate_no_positive_gain",
         "description": "Complete CRLD-Proto without positive-gain gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
         "PROTO_GATE_AGREEMENT": True,
@@ -168,7 +141,6 @@ ABLATION_MODE_SPECS = {
         "tag": "gate_no_confidence",
         "description": "Complete CRLD-Proto without prototype-confidence gating.",
         "PROTO_ENABLED": True,
-        "PROTO_USE_GLVQ": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
         "PROTO_GATE_AGREEMENT": True,
@@ -274,7 +246,11 @@ class FeatureHook:
         self.feature = None
 
     def hook_fn(self, module, input, output):
-        self.feature = output.view(output.size(0), -1)
+        if isinstance(output, (tuple, list)):
+            output = output[0] if output else None
+        self.feature = (
+            output.flatten(1) if torch.is_tensor(output) else None
+        )
 
     def clear(self):
         self.feature = None
@@ -310,11 +286,26 @@ def split_logits_and_pooled_feature(output):
     pooled_feature = None
     if isinstance(feature_info, dict):
         pooled_feature = feature_info.get("pooled_feat")
+    elif torch.is_tensor(feature_info):
+        pooled_feature = feature_info
     return logits, pooled_feature
 
 
+def extract_teacher_logits_and_feature(output, hook=None):
+    """Prefer a model-returned pooled feature, with a legacy hook fallback."""
+    logits, feature = split_logits_and_pooled_feature(output)
+    if feature is None and hook is not None:
+        feature = hook.feature
+    if feature is None:
+        raise RuntimeError(
+            "Teacher output contains no pooled feature and the fallback "
+            "feature hook is empty."
+        )
+    return logits, feature.detach().flatten(1)
+
+
 # ==============================================================================
-# 3. Multi-center GLVQ prototypes: feature mining + K-Means + smooth GLVQ
+# 3. Multi-center prototypes: reliable feature mining + K-Means
 # ==============================================================================
 def mine_reliable_teacher_features(
     teacher,
@@ -338,16 +329,16 @@ def mine_reliable_teacher_features(
             target = batch[1].to(device)
             image_weak = image_weak.to(device)
 
-            logits = teacher(image_weak)
-            if isinstance(logits, (list, tuple)): logits = logits[0]
-
-            features = hook.feature.detach()
-            # Normalize features before LVQ/GLVQ.
+            teacher_output = teacher(image_weak)
+            logits, features = extract_teacher_logits_and_feature(
+                teacher_output, hook
+            )
             # Keep the offline prototype cache on CPU. This is essential for
             # ImageNet, where storing every 2048-D feature on the GPU is not
-            # feasible. Float16 is converted back to float32 during GLVQ.
-            features_norm = F.normalize(features, dim=1).detach().cpu().to(storage_dtype)
-            hook.clear()
+            # feasible.
+            features_norm = F.normalize(features, dim=1).cpu().to(storage_dtype)
+            if hook is not None:
+                hook.clear()
 
             probs = F.softmax(logits, dim=1)
             entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1)
@@ -362,7 +353,8 @@ def mine_reliable_teacher_features(
                         or len(class_features[c]) < max_features_per_class
                     ):
                         class_features[c].append(features_norm[i].clone())
-    hook.close()
+    if hook is not None:
+        hook.close()
 
     selected_counts = {c: len(class_features[c]) for c in range(num_classes)}
     empty_classes = [c for c, count in selected_counts.items() if count == 0]
@@ -385,14 +377,12 @@ def mine_reliable_teacher_features(
     return class_features
 
 
-def optimize_multicenter_glvq_prototypes(
+def build_multicenter_prototypes(
     class_features,
     num_classes,
     K=3,
     device='cuda',
     feature_dim=128,
-    glvq_epochs=100,
-    use_glvq=True,
 ):
     selected_counts = {c: len(class_features[c]) for c in range(num_classes)}
     empty_classes = [c for c, count in selected_counts.items() if count == 0]
@@ -407,9 +397,6 @@ def optimize_multicenter_glvq_prototypes(
     prototypes_nk = torch.zeros(
         num_classes, K, feature_dim, device=device, dtype=torch.float32
     )
-    all_feats_list = []
-    all_targets_list = []
-
     for c in range(num_classes):
         feats_c = class_features[c]
         if len(feats_c) < K:
@@ -420,11 +407,8 @@ def optimize_multicenter_glvq_prototypes(
 
         X = torch.stack(feats_c).to(device=device, dtype=torch.float32)
         N_c = X.size(0)
-        if use_glvq:
-            all_feats_list.append(X.detach().cpu())
-            all_targets_list.append(torch.full((N_c,), c, dtype=torch.long))
 
-        # Use K-Means centers as the initial sub-prototypes for this class.
+        # Use cosine K-Means centers to represent the class's modes.
         indices = torch.randperm(N_c, device=device)[:K]
         centers = X[indices].clone()
         for _ in range(10):
@@ -440,108 +424,11 @@ def optimize_multicenter_glvq_prototypes(
             centers = new_centers
         prototypes_nk[c] = centers
 
-    prototypes_flat = prototypes_nk.view(-1, feature_dim).clone()
-    warmup_prototypes_flat = prototypes_flat.clone().detach()
-
-    if not use_glvq:
-        print(log_msg(
-            "K-Means-only prototypes ready; GLVQ optimization is disabled.",
-            "INFO",
-        ))
-        return F.normalize(prototypes_nk, dim=-1)
-
-    glvq_epochs = int(glvq_epochs)
-    if glvq_epochs < 1:
-        raise ValueError("glvq_epochs must be at least 1.")
-
-    print(log_msg(
-        f"Phase 3: Smooth GLVQ optimization via autograd ({glvq_epochs} epochs)...",
-        "INFO",
-    ))
-    all_feats = torch.cat(all_feats_list, dim=0)
-    all_targets = torch.cat(all_targets_list, dim=0)
-
-    glvq_dataset = TensorDataset(all_feats, all_targets)
-    glvq_loader = DataLoader(glvq_dataset, batch_size=512, shuffle=True)
-    proto_labels = torch.arange(num_classes, device=device).unsqueeze(1).repeat(1, K).view(-1)
-
-    # Full-data epochs, optimized in mini-batches with cosine decay.
-    base_lr = 0.01
-    min_lr = 0.001
-    gamma = 10.0
-    warmup_epochs = int(0.7 * glvq_epochs)
-    decay_epochs = glvq_epochs - warmup_epochs
-
-    with torch.enable_grad():
-        prototypes_param = nn.Parameter(prototypes_flat, requires_grad=True)
-        # SGD is stable for this small prototype-only optimization.
-        optimizer = torch.optim.SGD([prototypes_param], lr=base_lr, momentum=0.9)
-
-        for epoch in range(glvq_epochs):
-            # Keep base LR for the first 70%, then decay to min_lr.
-            if epoch < warmup_epochs:
-                lr = base_lr
-            else:
-                # Include the final epoch so the schedule reaches min_lr.
-                progress = (epoch - warmup_epochs) / max(decay_epochs - 1, 1)
-                progress = min(max(progress, 0.0), 1.0)
-                lr = min_lr + 0.5 * (base_lr - min_lr) * (1 + math.cos(math.pi * progress))
-
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-
-            for f_batch, y_batch in glvq_loader:
-                f_batch = f_batch.to(
-                    device=device, dtype=prototypes_param.dtype, non_blocking=True
-                )
-                y_batch = y_batch.to(device=device, non_blocking=True)
-                optimizer.zero_grad()
-                p_norm = F.normalize(prototypes_param, dim=1)
-
-                sim = torch.matmul(f_batch, p_norm.t())
-                dist = 1.0 - sim
-
-                pos_mask = (proto_labels.unsqueeze(0) == y_batch.unsqueeze(1))
-                neg_mask = ~pos_mask
-
-                # Soft-min distances to positive and negative prototypes.
-                d_pos_matrix = dist.masked_fill(neg_mask, 10.0)
-                d_neg_matrix = dist.masked_fill(pos_mask, 10.0)
-
-                d_pos = - (1.0 / gamma) * torch.logsumexp(-gamma * d_pos_matrix, dim=1)
-                d_neg = - (1.0 / gamma) * torch.logsumexp(-gamma * d_neg_matrix, dim=1)
-
-                # GLVQ relative-distance objective with a sigmoid loss.
-                mu = (d_pos - d_neg) / (d_pos + d_neg + 1e-8)
-                loss = torch.sigmoid(10.0 * mu).mean()
-
-                loss.backward()
-                optimizer.step()
-
-                # Re-normalize prototypes after every update.
-                with torch.no_grad():
-                    prototypes_param.copy_(F.normalize(prototypes_param, dim=1))
-
-    prototypes_nk_final = prototypes_param.detach().view(num_classes, K, feature_dim)
-    print(log_msg("Smooth GLVQ optimization finished.", "INFO"))
-
-    # Track how far GLVQ moved prototypes from their K-Means warm start.
-    with torch.no_grad():
-        final_flat = prototypes_param.detach()
-        cos_sim = (warmup_prototypes_flat * final_flat).sum(dim=1)
-        mean_shift = cos_sim.mean().item()
-        min_shift = cos_sim.min().item()
-
-    print(log_msg("=" * 60, "INFO"))
-    print(log_msg("[Manifold Analysis] Cosine similarity (warmup vs GLVQ):", "INFO"))
-    print(log_msg(f"   => Average Similarity across {num_classes * K} sub-centers: {mean_shift:.4f}", "INFO"))
-    print(log_msg(f"   => Minimum Similarity (Most Shifted Sub-center): {min_shift:.4f}", "INFO"))
-    print(log_msg("=" * 60, "INFO"))
-
-    return prototypes_nk_final
+    print(log_msg("K-Means prototypes ready; prototypes are fixed during student training.", "INFO"))
+    return F.normalize(prototypes_nk, dim=-1)
 
 
-def precompute_multicenter_glvq_prototypes(
+def precompute_multicenter_prototypes(
     teacher,
     train_loader,
     num_classes,
@@ -549,8 +436,6 @@ def precompute_multicenter_glvq_prototypes(
     device='cuda',
     feature_dim=128,
     tau_w=0.8,
-    glvq_epochs=100,
-    use_glvq=True,
     max_features_per_class=None,
     storage_dtype=torch.float32,
 ):
@@ -563,14 +448,12 @@ def precompute_multicenter_glvq_prototypes(
         max_features_per_class=max_features_per_class,
         storage_dtype=storage_dtype,
     )
-    return optimize_multicenter_glvq_prototypes(
+    return build_multicenter_prototypes(
         class_features=class_features,
         num_classes=num_classes,
         K=K,
         device=device,
         feature_dim=feature_dim,
-        glvq_epochs=glvq_epochs,
-        use_glvq=use_glvq,
     )
 
 
@@ -594,14 +477,14 @@ def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, d
     prototypes_norm = F.normalize(prototypes_nk, dim=-1)
 
     print(log_msg(
-        "Evaluating GLVQ prototypes with Log-Mean-Exp "
+        "Evaluating K-Means prototypes with Log-Mean-Exp "
         f"(K={k_num}, tau_p={proto_temp}, view={view}, repeats={repeats})...",
         "INFO",
     ))
 
     with torch.no_grad():
         for repeat_index in range(repeats):
-            progress_desc = f"GLVQ NPC {view} {repeat_index + 1}/{repeats}"
+            progress_desc = f"Prototype NPC {view} {repeat_index + 1}/{repeats}"
             for batch in tqdm(val_loader, desc=progress_desc):
                 image_data = batch[0]
                 if isinstance(image_data, (list, tuple)):
@@ -612,11 +495,13 @@ def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, d
                 targets = batch[1].to(device)
                 images = images.to(device)
 
-                logits_teacher = teacher(images)
-                if isinstance(logits_teacher, (list, tuple)):
-                    logits_teacher = logits_teacher[0]
-                features_norm = F.normalize(hook.feature.detach(), dim=1)
-                hook.clear()
+                teacher_output = teacher(images)
+                logits_teacher, features = extract_teacher_logits_and_feature(
+                    teacher_output, hook
+                )
+                features_norm = F.normalize(features, dim=1)
+                if hook is not None:
+                    hook.clear()
 
                 sim = torch.matmul(
                     features_norm,
@@ -636,14 +521,15 @@ def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, d
                 harmed += (teacher_correct_mask & (~proto_correct_mask)).sum().item()
                 total += targets.size(0)
 
-    hook.close()
+    if hook is not None:
+        hook.close()
     proto_acc = 100. * correct / total
     teacher_acc = 100. * teacher_correct / total
     rescue_rate = 100. * rescued / teacher_wrong if teacher_wrong else 0.0
     harm_rate = 100. * harmed / teacher_right if teacher_right else 0.0
     print(log_msg("=" * 60, "INFO"))
     print(log_msg(
-        f"GLVQ prototype (K={k_num}, view={view}) Top-1 Accuracy: {proto_acc:.2f}%",
+        f"Prototype (K={k_num}, view={view}) Top-1 Accuracy: {proto_acc:.2f}%",
         "INFO",
     ))
     if return_metrics:
@@ -719,7 +605,7 @@ def create_proto_scan_loaders(train_loader, dataset_type, num_classes,
     common_loader_args = {
         'batch_size': train_loader.batch_size,
         'shuffle': False,
-        'num_workers': min(int(getattr(train_loader, 'num_workers', 0)), 4),
+        'num_workers': min(int(getattr(train_loader, 'num_workers', 0)), 8),
         'pin_memory': getattr(train_loader, 'pin_memory', False),
     }
     prototype_loader = DataLoader(
@@ -785,8 +671,7 @@ def write_proto_scan_summary(markdown_path, rows, settings, selected):
             f"- 原型构建集：每类保留 {settings['val_per_class']} 张，"
             f"共 {settings['val_per_class'] * settings['num_classes']} 张分层验证图像\n"
         )
-        file.write(f"- GLVQ 扫描迭代次数：{settings['glvq_epochs']}\n")
-        file.write(f"- GLVQ：{'启用' if settings['use_glvq'] else '关闭'}\n")
+        file.write("- 原型构建：类内 K-Means（10 次更新）\n")
         file.write(f"- 强视图重复次数：{settings['strong_repeats']}\n")
         file.write(f"- 随机种子：{settings['seed']}\n\n")
 
@@ -825,8 +710,7 @@ def write_proto_scan_summary(markdown_path, rows, settings, selected):
 
 def run_proto_parameter_scan(teacher, train_loader, num_classes, feature_dim, K,
                              proto_temps, tau_values, seed, split_seed,
-                             val_per_class, strong_repeats, glvq_epochs,
-                             use_glvq, dataset_type,
+                             val_per_class, strong_repeats, dataset_type,
                              experiment_name, device='cuda'):
     if dataset_type not in {"cifar100", "tinyimagenet200", "tinyimagenet200_384"}:
         raise ValueError(
@@ -866,8 +750,7 @@ def run_proto_parameter_scan(teacher, train_loader, num_classes, feature_dim, K,
         for tau_w in tau_values:
             print(log_msg("=" * 72, "INFO"))
             print(log_msg(
-                f"Prototype parameter scan: tau_w={tau_w:.2f}, K={K}, "
-                f"GLVQ={'on' if use_glvq else 'off'}, epochs={glvq_epochs}",
+                f"Prototype parameter scan: tau_w={tau_w:.2f}, K={K}",
                 "INFO",
             ))
             start_time = time.time()
@@ -881,14 +764,12 @@ def run_proto_parameter_scan(teacher, train_loader, num_classes, feature_dim, K,
                     tau_w=tau_w,
                 )
                 counts = [len(features) for features in class_features.values()]
-                prototypes_nk = optimize_multicenter_glvq_prototypes(
+                prototypes_nk = build_multicenter_prototypes(
                     class_features=class_features,
                     num_classes=num_classes,
                     K=K,
                     device=device,
                     feature_dim=feature_dim,
-                    glvq_epochs=glvq_epochs,
-                    use_glvq=use_glvq,
                 )
             except RuntimeError as error:
                 print(log_msg(
@@ -947,8 +828,6 @@ def run_proto_parameter_scan(teacher, train_loader, num_classes, feature_dim, K,
             'split_seed': split_seed,
             'val_per_class': val_per_class,
             'strong_repeats': strong_repeats,
-            'glvq_epochs': glvq_epochs,
-            'use_glvq': use_glvq,
         }
         write_proto_scan_summary(markdown_path, rows, settings, selected)
         print(log_msg("=" * 72, "INFO"))
@@ -1226,6 +1105,18 @@ def _project_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def get_proto_method_cfg(config):
+    """Return the method-specific prototype configuration node."""
+    if config.DISTILLER.TYPE == "MPKD":
+        return config.MPKD
+    if config.DISTILLER.TYPE == "CRLD_Proto":
+        return config.CRLD
+    raise ValueError(
+        "tools/train_proto.py supports CRLD_Proto and MPKD; "
+        "use tools/train.py for the original single-view KD/DKD/NKD runs."
+    )
+
+
 def append_method_metadata(
     experiment_name,
     cfg,
@@ -1234,41 +1125,50 @@ def append_method_metadata(
     baseline_name,
     ablation_mode=None,
 ):
-    """Append explicit method provenance before a local CRLD-Proto run."""
+    """Append explicit method provenance before a prototype run."""
     log_dir = os.path.join(cfg.LOG.PREFIX, experiment_name)
     os.makedirs(log_dir, exist_ok=True)
     worklog_path = os.path.join(log_dir, "worklog.txt")
-    proto_enabled = bool(getattr(cfg.CRLD, "PROTO_ENABLED", True))
-    relationship = (
-        "complete CRLD without prototype correction"
-        if not proto_enabled
-        else (
-            "complete CRLD with prototype correction applied only to the "
-            "teacher strong-view same-view target"
+    method_cfg = get_proto_method_cfg(cfg)
+    proto_enabled = bool(getattr(method_cfg, "PROTO_ENABLED", True))
+    if cfg.DISTILLER.TYPE == "MPKD":
+        relationship = (
+            "MPKD keeps the selected base method's category-level loss and "
+            "uses prototypes only for the teacher strong-view same-view target."
         )
-    )
-    ablation_description = (
-        ABLATION_MODE_SPECS[ablation_mode]["description"]
-        if ablation_mode is not None
-        else "Formal complete CRLD-Proto run."
-    )
+    else:
+        relationship = (
+            "CRLD-Proto preserves complete CRLD and changes only the teacher "
+            "strong-view same-view target through gated prototype correction."
+        )
+    if not proto_enabled:
+        relationship = (
+            "the selected two-view distillation method without prototype "
+            "correction"
+        )
+    if ablation_mode is not None:
+        ablation_description = ABLATION_MODE_SPECS[ablation_mode]["description"]
+    elif cfg.DISTILLER.TYPE == "MPKD":
+        ablation_description = "Formal MPKD compatibility run."
+    else:
+        ablation_description = "Formal complete CRLD-Proto run."
     with open(worklog_path, "a", encoding="utf-8") as writer:
         writer.writelines([
             "\n" + "=" * 48 + "\n",
             f"method: {method_name}\n",
             f"baseline: {baseline_name}\n",
-            f"relationship: {relationship}.\n",
+            f"relationship: {relationship.rstrip('.')}.\n",
             f"ablation_mode: {ablation_mode or 'none'}\n",
             f"ablation_description: {ablation_description}\n",
             f"prototype_enabled: {proto_enabled}\n",
-            f"prototype_use_glvq: {bool(getattr(cfg.CRLD, 'PROTO_USE_GLVQ', True))}\n",
-            f"prototype_fusion_mode: {getattr(cfg.CRLD, 'PROTO_FUSION_MODE', 'gated')}\n",
-            f"prototype_fusion_scale: {float(getattr(cfg.CRLD, 'PROTO_FUSION_SCALE', 0.5)):.3f}\n",
+            f"prototype_fusion_mode: {getattr(method_cfg, 'PROTO_FUSION_MODE', 'gated')}\n",
+            f"prototype_fusion_scale: {float(getattr(method_cfg, 'PROTO_FUSION_SCALE', 0.5)):.3f}\n",
             "prototype_gates: "
-            f"uncertainty={bool(getattr(cfg.CRLD, 'PROTO_GATE_UNCERTAINTY', True))}, "
-            f"agreement={bool(getattr(cfg.CRLD, 'PROTO_GATE_AGREEMENT', True))}, "
-            f"positive_gain={bool(getattr(cfg.CRLD, 'PROTO_GATE_POSITIVE_GAIN', True))}, "
-            f"confidence={bool(getattr(cfg.CRLD, 'PROTO_GATE_CONFIDENCE', True))}\n",
+            f"uncertainty={bool(getattr(method_cfg, 'PROTO_GATE_UNCERTAINTY', True))}, "
+            f"agreement={bool(getattr(method_cfg, 'PROTO_GATE_AGREEMENT', True))}, "
+            f"positive_gain={bool(getattr(method_cfg, 'PROTO_GATE_POSITIVE_GAIN', True))}, "
+            f"confidence={bool(getattr(method_cfg, 'PROTO_GATE_CONFIDENCE', True))}\n",
+            f"base_method: {getattr(method_cfg, 'BASE_METHOD', 'CRLD')}\n",
             f"seed: {training_seed}\n",
             f"started_at: {datetime.now().isoformat(timespec='seconds')}\n",
             "=" * 48 + "\n",
@@ -1369,13 +1269,26 @@ def input_size_for_dataset(dataset_type):
 def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
          proto_scan_taus=None, proto_scan_seed=42, proto_scan_split_seed=2026,
          proto_scan_val_per_class=20, proto_scan_strong_repeats=1,
-         proto_scan_glvq_epochs=30, training_seed=DEFAULT_TRAINING_SEED,
+         training_seed=DEFAULT_TRAINING_SEED,
          ablation_mode=None):
+    if cfg.DISTILLER.TYPE not in PROTO_DISTILLER_TYPES:
+        raise ValueError(
+            f"Unsupported distiller type {cfg.DISTILLER.TYPE!r} for "
+            "tools/train_proto.py. Use CRLD_Proto or MPKD here; use "
+            "tools/train.py for the original KD/DKD/NKD implementations."
+        )
     set_training_seed(training_seed)
     experiment_name = cfg.EXPERIMENT.NAME or cfg.EXPERIMENT.TAG
     experiment_name = os.path.join(cfg.EXPERIMENT.PROJECT, experiment_name)
-    method_name = cfg.EXPERIMENT.METHOD or METHOD_DISPLAY_NAME
-    baseline_name = cfg.EXPERIMENT.BASELINE or BASELINE_DISPLAY_NAME
+    method_name = cfg.EXPERIMENT.METHOD or (
+        "MPKD" if cfg.DISTILLER.TYPE == "MPKD" else METHOD_DISPLAY_NAME
+    )
+    baseline_name = cfg.EXPERIMENT.BASELINE or (
+        getattr(cfg.MPKD, "BASE_METHOD", "KD")
+        if cfg.DISTILLER.TYPE == "MPKD"
+        else BASELINE_DISPLAY_NAME
+    )
+    method_cfg = get_proto_method_cfg(cfg)
 
     cfg.defrost()
     cfg.LOG.SAVE_CHECKPOINT_FREQ = 9999
@@ -1388,10 +1301,19 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
             f"{ABLATION_MODE_SPECS[ablation_mode]['description']}",
             "INFO",
         ))
+    if cfg.DISTILLER.TYPE == "MPKD":
+        method_description = (
+            "MPKD keeps the selected KD/DKD/NKD category-level loss and "
+            "applies prototype correction only to the teacher strong-view "
+            "same-view target."
+        )
+    else:
+        method_description = (
+            "CRLD-Proto preserves complete CRLD and changes only the teacher "
+            "strong-view same-view target through gated prototype correction."
+        )
     print(log_msg(
-        f"Method: {method_name}; baseline: {baseline_name}. "
-        "CRLD-Proto preserves complete CRLD and changes only the teacher "
-        "strong-view same-view target through gated prototype correction.",
+        f"Method: {method_name}; baseline: {baseline_name}. " + method_description,
         "INFO",
     ))
     print(log_msg(f"Training seed: {training_seed}", "INFO"))
@@ -1406,26 +1328,26 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
     # BatchNorm running statistics before prototype mining and distillation.
     model_teacher.eval()
 
-    proto_enabled = bool(getattr(cfg.CRLD, 'PROTO_ENABLED', True))
-    use_glvq = bool(getattr(cfg.CRLD, 'PROTO_USE_GLVQ', True))
+    proto_enabled = bool(getattr(method_cfg, 'PROTO_ENABLED', True))
     feat_dim = None
     if proto_enabled or proto_scan:
         dummy_size = input_size_for_dataset(cfg.DATASET.TYPE)
         with torch.no_grad():
             hook = register_avgpool_hook(model_teacher)
-            if hook is None:
-                raise RuntimeError(
-                    f"Could not locate a pooled feature layer in teacher {cfg.DISTILLER.TEACHER}."
-                )
-            _ = model_teacher(torch.zeros(1, 3, dummy_size, dummy_size).cuda())
-            feat_dim = hook.feature.shape[1]
-            hook.close()
+            probe_output = model_teacher(
+                torch.zeros(1, 3, dummy_size, dummy_size).cuda()
+            )
+            _, probe_feature = extract_teacher_logits_and_feature(
+                probe_output, hook
+            )
+            feat_dim = probe_feature.shape[1]
+            if hook is not None:
+                hook.close()
 
-    tau_w = getattr(cfg.CRLD, 'PROTO_TAU_W', 0.80)
-    proto_temp = getattr(cfg.CRLD, 'PROTO_TEMP', 0.5)
-    K_subcenters = int(getattr(cfg.CRLD, 'PROTO_K', 3))
-    glvq_epochs = int(getattr(cfg.CRLD, 'PROTO_GLVQ_EPOCHS', 100))
-    max_proto_samples = int(getattr(cfg.CRLD, 'PROTO_MAX_SAMPLES_PER_CLASS', 0))
+    tau_w = getattr(method_cfg, 'PROTO_TAU_W', 0.80)
+    proto_temp = getattr(method_cfg, 'PROTO_TEMP', 0.5)
+    K_subcenters = int(getattr(method_cfg, 'PROTO_K', 3))
+    max_proto_samples = int(getattr(method_cfg, 'PROTO_MAX_SAMPLES_PER_CLASS', 0))
     max_proto_samples = max_proto_samples if max_proto_samples > 0 else None
     storage_dtype = (
         torch.float16 if cfg.DATASET.TYPE == 'imagenet' else torch.float32
@@ -1452,8 +1374,6 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
             split_seed=proto_scan_split_seed,
             val_per_class=proto_scan_val_per_class,
             strong_repeats=proto_scan_strong_repeats,
-            glvq_epochs=proto_scan_glvq_epochs,
-            use_glvq=use_glvq,
             dataset_type=cfg.DATASET.TYPE,
             experiment_name=experiment_name,
             device='cuda',
@@ -1467,7 +1387,7 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
     if proto_enabled:
         training_rng_state = capture_rng_state()
         with torch.no_grad():
-            prototypes_nk = precompute_multicenter_glvq_prototypes(
+            prototypes_nk = precompute_multicenter_prototypes(
                 teacher=model_teacher,
                 train_loader=train_loader,
                 num_classes=num_classes,
@@ -1475,8 +1395,6 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
                 device='cuda',
                 feature_dim=feat_dim,
                 tau_w=tau_w,
-                glvq_epochs=glvq_epochs,
-                use_glvq=use_glvq,
                 max_features_per_class=max_proto_samples,
                 storage_dtype=storage_dtype,
             )
@@ -1490,11 +1408,19 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
             )
 
         restore_rng_state(training_rng_state)
-        prototype_optimizer = "K-Means + GLVQ" if use_glvq else "K-Means only"
+        if cfg.DISTILLER.TYPE == "MPKD":
+            prototype_message = (
+                "Selected KD/DKD/NKD loss retained; prototype correction changes "
+                "only the teacher strong-view same-view target."
+            )
+        else:
+            prototype_message = (
+                "Complete CRLD structure retained; prototype correction changes "
+                "only the teacher strong-view same-view target."
+            )
         print(log_msg(
-            "Complete CRLD structure retained; prototype correction changes only "
-            "the teacher strong-view same-view target. "
-            f"Prototype optimizer={prototype_optimizer}, K={K_subcenters}, "
+            prototype_message + " "
+            f"Prototype construction=K-Means, K={K_subcenters}, "
             f"tau_p={proto_temp}, seed={training_seed}.",
             "INFO",
         ))
@@ -1545,7 +1471,7 @@ if __name__ == "__main__":
     import multiprocessing
 
     multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser("CRLD-Proto training")
+    parser = argparse.ArgumentParser("CRLD-Proto/MPKD training")
     parser.add_argument("--cfg", type=str, default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_TRAINING_SEED)
@@ -1581,7 +1507,6 @@ if __name__ == "__main__":
     parser.add_argument("--proto-scan-split-seed", type=int, default=2026)
     parser.add_argument("--proto-scan-val-per-class", type=int, default=20)
     parser.add_argument("--proto-scan-strong-repeats", type=int, default=1)
-    parser.add_argument("--proto-scan-glvq-epochs", type=int, default=30)
     parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
@@ -1593,8 +1518,6 @@ if __name__ == "__main__":
         parser.error("--proto-scan-val-per-class must be at least 1.")
     if args.proto_scan_strong_repeats < 1:
         parser.error("--proto-scan-strong-repeats must be at least 1.")
-    if args.proto_scan_glvq_epochs < 1:
-        parser.error("--proto-scan-glvq-epochs must be at least 1.")
     if any(tau > 1.0 for tau in args.proto_scan_taus):
         parser.error("--proto-scan-taus values must be in (0, 1].")
 
@@ -1617,7 +1540,6 @@ if __name__ == "__main__":
         proto_scan_split_seed=args.proto_scan_split_seed,
         proto_scan_val_per_class=args.proto_scan_val_per_class,
         proto_scan_strong_repeats=args.proto_scan_strong_repeats,
-        proto_scan_glvq_epochs=args.proto_scan_glvq_epochs,
         training_seed=args.seed,
         ablation_mode=args.ablation_mode,
     )

@@ -1,8 +1,9 @@
 # CRLD-Proto 实验日志
 
-> 更新时间：2026-08-29
-> 记录范围：汇总完整 CRLD 结构上的 CRLD-Proto 主结果、无 GLVQ 对照，以及无 GLVQ 分支的融合权重调参结果。
+> 更新时间：2026-09-16
+> 记录范围：汇总完整 CRLD 结构上的 CRLD-Proto 历史主结果、无判别式原型优化的当前结果，以及无判别式原型分支的融合权重调参结果。
 > 方法关系：CRLD 是原始文献基线；CRLD-Proto 是本文在完整 CRLD 上加入多中心原型修正后的方法。
+> 代码状态：当前正式代码仅使用可靠弱视图特征上的 K-Means 多中心原型；早期判别式原型优化记录仅作历史审计，不影响现有 CRLD、KD、DKD、NKD 入口。
 
 ## 1. 实验目标
 
@@ -49,7 +50,7 @@ $$
 \operatorname{Softmax}\left(\frac{z_{v,i}^{T}}{T}\right).
 $$
 
-### 2.2 离线构建多子原型
+### 2.2 离线构建多子原型（历史记录与当前实现）
 
 首先提取教师弱视图特征 $f_{w,i}^{T}$，并进行 L2 归一化。弱视图熵置信度定义为：
 
@@ -74,7 +75,7 @@ m_i^{p}
 \right).
 $$
 
-原型构建流程：
+早期实验曾采用以下原型构建流程，相关结果保留在本日志中作为历史对照：
 
 1. 按真实类别收集满足 $m_i^{p}=1$ 的弱视图教师特征。
 2. 每个类别执行 10 次 K-Means 更新，初始化 $K=3$ 个子原型。
@@ -82,6 +83,8 @@ $$
 4. GLVQ 前 70% 轮次保持学习率 $0.01$，后 30% 使用余弦退火降至 $0.001$。
 5. Soft-min 参数固定为 $\gamma=10$，每次原型更新后重新进行 L2 归一化。
 6. 原型在学生训练开始前固定，不参与学生反向传播。
+
+当前正式实现已经移除上述判别式原型优化步骤，仅执行可靠特征筛选、类内 K-Means 更新和 L2 归一化；因此当前运行不再需要判别式原型的学习率、迭代轮数或额外损失参数。
 
 GLVQ 使用余弦距离 $d=1-\cos(\cdot,\cdot)$，分别计算平滑正类距离与负类距离：
 
@@ -518,11 +521,13 @@ output/cifar100_baselines/crld_proto,wrn_40_2,res8x4
 python tools/train_proto.py --cfg configs/cifar100/crld_proto/res110_res32.yaml --seed 42
 ```
 
-按 `批量运行.py` 中启用的列表顺序训练：
+按 `tools/run_cifar100_architectures.py` 中启用的列表顺序训练：
 
 ```powershell
-python 批量运行.py
+python tools/run_cifar100_architectures.py
 ```
+
+文件索引和实验协议见 `experiments/README.md`、`experiments/PROTOCOL.md`；结构化消融表见 `experiments/RESULTS.md`。
 
 ## 6. 结果汇总
 
@@ -547,7 +552,7 @@ python 批量运行.py
 | VGG13 -> MobileNetV2 | 70.39% | 71.00% | 70.79% | **71.67%** | **71.67%（+1.28）** | 保留 scale=0.25 |
 | WRN40-2 -> MobileNetV2 | 70.37% | 71.00% | 70.85% | **71.24%** | **71.24%（+0.87）** | 保留 scale=0.25 |
 | WRN40-2 -> ResNet8x4 | 77.28% | 77.53% | 77.20% | **77.54%** | **77.54%（+0.26）** | 保留 scale=0.25 |
-<!-- GLVQ_RESULTS_AUTO -->
+<!-- PROTOTYPE_RESULTS_AUTO -->
 
 ### 6.1 结果判断
 
@@ -575,12 +580,48 @@ WRN40-2 -> MobileNetV2: output/cifar100_baselines/crld_proto,wrn40_2,mv2,ablatio
 WRN40-2 -> ResNet8x4: output/cifar100_baselines/crld_proto,wrn_40_2,res8x4,ablation_e_no_glvq
 
 无 GLVQ 调参（PROTO_FUSION_SCALE=0.25）
-output/cifar100_baselines/crld_proto,tune_noglvq,res32x4_wrn_16_2,f025,ablation_e_no_glvq
-output/cifar100_baselines/crld_proto,tune_noglvq,vgg13_vgg8,f025,ablation_e_no_glvq
-output/cifar100_baselines/crld_proto,tune_noglvq,vgg13_mv2,f025,ablation_e_no_glvq
-output/cifar100_baselines/crld_proto,tune_noglvq,wrn40_2_mv2,f025,ablation_e_no_glvq
-output/cifar100_baselines/crld_proto,tune_noglvq,wrn40_2_res8x4,f025,ablation_e_no_glvq
-output/cifar100_baselines/crld_proto,tune_noglvq,res50_mv2,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,res32x4_wrn_16_2,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,vgg13_vgg8,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,vgg13_mv2,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,wrn40_2_mv2,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,wrn40_2_res8x4,f025,ablation_e_no_glvq
+output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,res50_mv2,f025,ablation_e_no_glvq
 ```
 
 其中最后一项为已完成但未采用的候选结果，保留目录仅用于审计和复现；其余五组调参结果已采用，E 对照目录仍按各架构原有的 `ablation_e_no_glvq` 或 `e_no_glvq` 目录保存。
+
+<!-- CIFAR100_ABLATION_RESULTS_START -->
+## 7. CIFAR-100 消融实验
+
+> 此节由 `tools/run_cifar100_ablations.py` 根据独立 `worklog.txt` 自动同步。
+
+### 1.1 A-E 递进消融
+
+| 模式 | 关键设置 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| A | 完整 CRLD，无原型 | ablation_a | 77.29% | 190 | 76.95% | 已完成 |
+| B | K-Means 原型 + 固定融合 | ablation_b | 77.72% | 224 | 77.63% | 已完成 |
+| C | B + GLVQ（历史审计） | ablation_c | 77.41% | 211 | 77.29% | 已完成 |
+| D | C + 不确定度权重（历史审计） | ablation_d | 77.58% | 216 | 77.33% | 已完成 |
+| E | 完整 CRLD-Proto | ablation_e | 77.04% | 228 | 76.89% | 已完成 |
+
+### 1.2 门控因子消融
+
+| 模式 | 删除的唯一因子 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| gate_no_uncertainty | 强视图不确定度 | gate_no_uncertainty | 77.40% | 225 | 77.28% | 已完成 |
+| gate_no_agreement | 类别一致性 | gate_no_agreement | 77.19% | 236 | 77.07% | 已完成 |
+| gate_no_positive_gain | 锚定类正向增益 | gate_no_positive_gain | 77.31% | 236 | 77.00% | 已完成 |
+| gate_no_confidence | 原型置信度 | gate_no_confidence | 77.22% | 200 | 77.00% | 已完成 |
+
+### 1.3 无 GLVQ 对照
+
+以下记录只用于判断 GLVQ 的影响，不改变 CRLD-Proto 的方法定义。
+
+| 模式 | 关键设置 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| A | 完整 CRLD，无原型 | ablation_a（复用） | 77.29% | 190 | 76.95% | 已完成 |
+| B | K-Means 原型 + 固定融合 | ablation_b（复用） | 77.72% | 224 | 77.63% | 已完成 |
+| D_no_glvq | K-Means 原型 + 不确定度门控，无 GLVQ | ablation_d_no_glvq | 77.53% | 215 | 77.25% | 已完成 |
+| E_no_glvq | K-Means 原型 + 全部门控，无 GLVQ | ablation_e_no_glvq | 77.44% | 228 | 77.24% | 已完成 |
+<!-- CIFAR100_ABLATION_RESULTS_END -->

@@ -16,6 +16,7 @@ from .NKD import NKD
 from .MLLD import MLLD
 from .NormKD import NormKD
 from .CRLD import CRLD
+from .MPKD import MPKD
 
 distiller_dict = {
     "NONE": Vanilla,
@@ -36,4 +37,5 @@ distiller_dict = {
     "MLLD": MLLD,
     "NormKD": NormKD,
     "CRLD": CRLD,
+    "MPKD": MPKD,
 }

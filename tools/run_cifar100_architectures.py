@@ -1,4 +1,4 @@
-"""按顺序运行未完成的无 GLVQ 对照实验，并记录成功结果。"""
+"""按顺序运行未完成的原型门控实验，并记录成功结果。"""
 
 import re
 import subprocess
@@ -9,15 +9,15 @@ from pathlib import Path
 import yaml
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 LOG_PATH = ROOT / "experiments" / "log.md"
 DEFAULT_TRAINING_SEED = 42
 
-GLVQ_MODE = "E_no_glvq"
-GLVQ_TAG = "ablation_e_no_glvq"
-GLVQ_LOG_MARKER = "<!-- GLVQ_RESULTS_AUTO -->"
+ABLATION_MODE = "E"
+ABLATION_TAG = "ablation_e"
+RESULTS_LOG_MARKER = "<!-- PROTOTYPE_RESULTS_AUTO -->"
 
-# 已完成的两组无 GLVQ 对照不重复运行；这里保留其余十组架构。
+# 已完成的两组对照不重复运行；这里保留其余十组架构。
 EXPERIMENTS = [
     {
         "name": "ResNet110 -> ResNet32",
@@ -91,8 +91,8 @@ def effective_experiment_name(config, mode=None):
     experiment = config["EXPERIMENT"]
     field = "NAME" if experiment.get("NAME") else "TAG"
     name = experiment[field]
-    if mode is not None and not name.endswith("," + GLVQ_TAG):
-        name = f"{name},{GLVQ_TAG}"
+    if mode is not None and not name.endswith("," + ABLATION_TAG):
+        name = f"{name},{ABLATION_TAG}"
     return name
 
 
@@ -127,15 +127,15 @@ def initialize_log_section():
     log_text = LOG_PATH.read_text(encoding="utf-8")
     if "## 6. 结果汇总" not in log_text:
         raise RuntimeError("log.md 缺少统一结果汇总章节，未启动批量训练。")
-    if GLVQ_LOG_MARKER not in log_text:
-        raise RuntimeError("log.md 缺少 GLVQ 结果写入标记，未启动批量训练。")
+    if RESULTS_LOG_MARKER not in log_text:
+        raise RuntimeError("log.md 缺少原型实验结果写入标记，未启动批量训练。")
 
 
-def append_glvq_result(experiment, config, best_acc, training_seed):
-    output_name = effective_experiment_name(config, GLVQ_MODE)
+def append_ablation_result(experiment, config, best_acc, training_seed):
+    output_name = effective_experiment_name(config, ABLATION_MODE)
     log_text = LOG_PATH.read_text(encoding="utf-8")
     if output_name in log_text:
-        print(f"{experiment['name']} 已有 GLVQ 对照记录，跳过重复写入。")
+        print(f"{experiment['name']} 已有原型实验记录，跳过重复写入。")
         return
 
     formal_best = experiment["formal_best"]
@@ -147,12 +147,12 @@ def append_glvq_result(experiment, config, best_acc, training_seed):
         "新增 E（scale=0.5） |\n"
     )
     LOG_PATH.write_text(
-        log_text.replace(GLVQ_LOG_MARKER, row + GLVQ_LOG_MARKER, 1),
+        log_text.replace(RESULTS_LOG_MARKER, row + RESULTS_LOG_MARKER, 1),
         encoding="utf-8",
     )
 def main():
     initialize_log_section()
-    print("开始批量运行其余无 GLVQ 对照，结果将写入 log.md 第 6 节...")
+    print("开始批量运行原型门控实验，结果将写入 log.md 第 6 节...")
 
     for index, experiment in enumerate(EXPERIMENTS, start=1):
         model_name = experiment["name"]
@@ -160,7 +160,7 @@ def main():
         training_seed = DEFAULT_TRAINING_SEED
         config_path = ROOT / relative_config_path
         config = load_experiment_config(config_path)
-        worklog_path = worklog_path_for(config, GLVQ_MODE)
+        worklog_path = worklog_path_for(config, ABLATION_MODE)
         start_offset = worklog_path.stat().st_size if worklog_path.exists() else 0
         command = [
             sys.executable,
@@ -170,7 +170,7 @@ def main():
             "--seed",
             str(training_seed),
             "--ablation-mode",
-            GLVQ_MODE,
+            ABLATION_MODE,
         ]
         print(f"正在运行第 {index} 个实验：{model_name}")
         print("命令：", " ".join(command))
@@ -192,7 +192,7 @@ def main():
             print(f"第 {index} 个实验未找到新增 best_acc，本次结果未写入 log.md。")
             continue
 
-        append_glvq_result(experiment, config, best_acc, training_seed)
+        append_ablation_result(experiment, config, best_acc, training_seed)
         print(
             f"第 {index} 个实验完成，Best Acc={best_acc:.2f}%，"
             "已写入统一结果汇总。"

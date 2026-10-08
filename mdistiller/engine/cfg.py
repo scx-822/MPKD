@@ -16,10 +16,16 @@ def show_cfg(cfg):
     dump_cfg.SOLVER = cfg.SOLVER
     dump_cfg.LOG = cfg.LOG
     method_cfg_key = (
-        "CRLD" if cfg.DISTILLER.TYPE == "CRLD_Proto" else cfg.DISTILLER.TYPE
+        "CRLD"
+        if cfg.DISTILLER.TYPE == "CRLD_Proto"
+        else cfg.DISTILLER.TYPE
     )
     if method_cfg_key in cfg:
         dump_cfg.update({method_cfg_key: cfg.get(method_cfg_key)})
+    if cfg.DISTILLER.TYPE == "MPKD":
+        base_method = str(cfg.MPKD.BASE_METHOD).upper()
+        if base_method in cfg:
+            dump_cfg.update({base_method: cfg.get(base_method)})
     print(log_msg("CONFIG:\n{}".format(dump_cfg.dump()), "INFO"))
 
 
@@ -215,13 +221,38 @@ CFG.CRLD.PROTO_K = 3
 CFG.CRLD.PROTO_TEMP = 0.5
 CFG.CRLD.PROTO_FUSION_SCALE = 0.5
 CFG.CRLD.PROTO_TAU_W = 0.8
-CFG.CRLD.PROTO_GLVQ_EPOCHS = 100
 CFG.CRLD.PROTO_MAX_SAMPLES_PER_CLASS = 0
 # Ablation controls. The defaults reproduce the complete CRLD-Proto method.
 CFG.CRLD.PROTO_ENABLED = True
-CFG.CRLD.PROTO_USE_GLVQ = True
 CFG.CRLD.PROTO_FUSION_MODE = "gated"
 CFG.CRLD.PROTO_GATE_UNCERTAINTY = True
 CFG.CRLD.PROTO_GATE_AGREEMENT = True
 CFG.CRLD.PROTO_GATE_POSITIVE_GAIN = True
 CFG.CRLD.PROTO_GATE_CONFIDENCE = True
+
+# MPKD compatibility CFG.  The base method section (KD, DKD, or NKD) keeps
+# its original loss parameters; non-None fields below are optional overrides.
+CFG.MPKD = CN()
+CFG.MPKD.BASE_METHOD = "KD"
+CFG.MPKD.CE_WEIGHT = None
+CFG.MPKD.KD_WEIGHT = None
+CFG.MPKD.TEMPERATURE = None
+CFG.MPKD.ALPHA = None
+CFG.MPKD.BETA = None
+CFG.MPKD.GAMMA = None
+CFG.MPKD.WARMUP = None
+CFG.MPKD.WV_WEIGHT = 2.0
+CFG.MPKD.CV_WEIGHT = 0.5
+CFG.MPKD.TAU_W = 0.9
+CFG.MPKD.TAU_S = 0.2
+CFG.MPKD.PROTO_ENABLED = True
+CFG.MPKD.PROTO_FUSION_MODE = "gated"
+CFG.MPKD.PROTO_FUSION_SCALE = 0.5
+CFG.MPKD.PROTO_TEMP = 0.5
+CFG.MPKD.PROTO_TAU_W = 0.8
+CFG.MPKD.PROTO_K = 3
+CFG.MPKD.PROTO_MAX_SAMPLES_PER_CLASS = 0
+CFG.MPKD.PROTO_GATE_UNCERTAINTY = True
+CFG.MPKD.PROTO_GATE_AGREEMENT = True
+CFG.MPKD.PROTO_GATE_POSITIVE_GAIN = True
+CFG.MPKD.PROTO_GATE_CONFIDENCE = True

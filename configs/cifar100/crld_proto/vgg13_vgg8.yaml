@@ -21,21 +21,20 @@ SOLVER:
   LR: 0.05
   LR_DECAY_STAGES: [150, 180, 210]
   LR_DECAY_RATE: 0.1
-  # 当前正式最好：75.57%（seed=42，教师 BN 修复后完整复验）。
   WEIGHT_DECAY: 0.0005
   MOMENTUM: 0.9
   TYPE: "SGD"
   TRAINER: "crld"
 
 CRLD:
-  # 保持当前正式最好实验的 CRLD 损失权重和门控参数。
   TEMPERATURE: 4.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 2.0
   CV_WEIGHT: 0.5
   TAU_W: 0.8
   TAU_S: 0.2
-  # 对 VGG 教师使用较平滑的原型辅助分布。
-  PROTO_TEMP: 0.20
-  PROTO_TAU_W: 0.80
+  PROTO_TEMP: 0.2
+  PROTO_TAU_W: 0.9
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.25
+  PROTO_AGGREGATION: "logmeanexp"

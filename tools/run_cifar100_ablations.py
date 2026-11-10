@@ -12,10 +12,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS_PATH = ROOT / "experiments" / "RESULTS.md"
 LOG_PATH = ROOT / "experiments" / "log.md"
-RESULTS_START = "<!-- ABLATION_RESULTS_START -->"
-RESULTS_END = "<!-- ABLATION_RESULTS_END -->"
 LOG_START = "<!-- CIFAR100_ABLATION_RESULTS_START -->"
 LOG_END = "<!-- CIFAR100_ABLATION_RESULTS_END -->"
 DEFAULT_CONFIG = Path("configs/cifar100/crld_proto/res32x4_res8x4.yaml")
@@ -83,6 +80,9 @@ def has_completed_result(worklog: Path):
     if not worklog.is_file():
         return False
     text = worklog.read_text(encoding="utf-8", errors="ignore")
+    # Do not promote legacy worklogs that predate the current metadata format.
+    if "prototype_aggregation:" not in text:
+        return False
     return re.search(r"(?m)^best_acc\s+[0-9]+(?:\.[0-9]+)?\s*$", text) is not None
 
 
@@ -133,36 +133,13 @@ def update_markdown_row(markdown: str, mode: str, result: dict):
     return markdown[:match.start()] + replacement + markdown[match.end():]
 
 
-def sync_log_summary(results_markdown: str):
-    if RESULTS_START not in results_markdown or RESULTS_END not in results_markdown:
-        raise RuntimeError("RESULTS.md 缺少消融结果标记")
-    start = results_markdown.index(RESULTS_START) + len(RESULTS_START)
-    end = results_markdown.index(RESULTS_END, start)
-    body = results_markdown[start:end].strip()
-    section = (
-        f"{LOG_START}\n"
-        "## 7. CIFAR-100 消融实验\n\n"
-        "> 此节由 `tools/run_cifar100_ablations.py` 根据独立 "
-        "`worklog.txt` 自动同步。\n\n"
-        f"{body}\n{LOG_END}"
-    )
-    rendered = "".join(section)
-    log_text = LOG_PATH.read_text(encoding="utf-8")
-    if LOG_START in log_text and LOG_END in log_text:
-        start = log_text.index(LOG_START)
-        end = log_text.index(LOG_END, start) + len(LOG_END)
-        log_text = log_text[:start] + rendered + log_text[end:]
-    else:
-        log_text = log_text.rstrip() + "\n\n" + rendered + "\n"
-    LOG_PATH.write_text(log_text, encoding="utf-8")
-
-
 def record_completed_result(worklog: Path, mode: str):
     result = parse_completed_result(worklog, mode)
-    markdown = RESULTS_PATH.read_text(encoding="utf-8")
+    markdown = LOG_PATH.read_text(encoding="utf-8")
+    if LOG_START not in markdown or LOG_END not in markdown:
+        raise RuntimeError("log.md 缺少消融结果标记")
     markdown = update_markdown_row(markdown, mode, result)
-    RESULTS_PATH.write_text(markdown, encoding="utf-8")
-    sync_log_summary(markdown)
+    LOG_PATH.write_text(markdown, encoding="utf-8")
     print(
         f"recorded: best={result['best_acc']:.2f}% at epoch "
         f"{result['best_epoch']}, final={result['final_acc']:.2f}%"

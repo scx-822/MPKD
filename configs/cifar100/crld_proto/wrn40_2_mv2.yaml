@@ -27,8 +27,6 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  # 尚未训练的初始候选；对应 CRLD 基线为 70.37%。
-  # WRN 教师强视图噪声较大，因此降低交叉视图权重并提高门控阈值。
   TEMPERATURE: 3.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 1.0
@@ -36,5 +34,7 @@ CRLD:
   TAU_W: 0.8
   TAU_S: 0.65
   PROTO_TEMP: 0.35
-  PROTO_TAU_W: 0.80
+  PROTO_TAU_W: 0.8
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.25
+  PROTO_AGGREGATION: "logmeanexp"

@@ -15,7 +15,6 @@ DEFAULT_TRAINING_SEED = 42
 
 ABLATION_MODE = "E"
 ABLATION_TAG = "ablation_e"
-RESULTS_LOG_MARKER = "<!-- PROTOTYPE_RESULTS_AUTO -->"
 
 # 已完成的两组对照不重复运行；这里保留其余十组架构。
 EXPERIMENTS = [
@@ -125,10 +124,10 @@ def read_new_best_acc(worklog_path, start_offset):
 
 def initialize_log_section():
     log_text = LOG_PATH.read_text(encoding="utf-8")
-    if "## 6. 结果汇总" not in log_text:
+    if "## 3. 当前正式结果" not in log_text:
         raise RuntimeError("log.md 缺少统一结果汇总章节，未启动批量训练。")
-    if RESULTS_LOG_MARKER not in log_text:
-        raise RuntimeError("log.md 缺少原型实验结果写入标记，未启动批量训练。")
+    if "## 6. CIFAR-100 消融实验" not in log_text:
+        raise RuntimeError("log.md 缺少消融结果章节，未启动批量训练。")
 
 
 def append_ablation_result(experiment, config, best_acc, training_seed):
@@ -146,10 +145,10 @@ def append_ablation_result(experiment, config, best_acc, training_seed):
         f"**{best_acc:.2f}%** | — | **{best_acc:.2f}%（{delta:+.2f}）** | "
         "新增 E（scale=0.5） |\n"
     )
-    LOG_PATH.write_text(
-        log_text.replace(RESULTS_LOG_MARKER, row + RESULTS_LOG_MARKER, 1),
-        encoding="utf-8",
-    )
+    marker = "<!-- CIFAR100_ABLATION_RESULTS_START -->"
+    if marker not in log_text:
+        raise RuntimeError("log.md 缺少原型实验结果写入标记，未写入结果。")
+    LOG_PATH.write_text(log_text.replace(marker, marker + "\n" + row, 1), encoding="utf-8")
 def main():
     initialize_log_section()
     print("开始批量运行原型门控实验，结果将写入 log.md 第 6 节...")

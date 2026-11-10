@@ -51,6 +51,24 @@ DEFAULT_TRAINING_SEED = 42
 METHOD_DISPLAY_NAME = "CRLD-Proto"
 BASELINE_DISPLAY_NAME = "CRLD"
 PROTO_DISTILLER_TYPES = {"CRLD_Proto", "MPKD"}
+PROTO_AGGREGATIONS = {"logmeanexp", "mean", "max"}
+
+
+def aggregate_prototype_logits(scaled_similarity, aggregation="logmeanexp"):
+    """Aggregate K temperature-scaled prototype similarities per class."""
+    aggregation = str(aggregation).lower().replace("-", "")
+    if aggregation == "logmeanexp":
+        return torch.logsumexp(scaled_similarity, dim=2) - math.log(
+            scaled_similarity.size(2)
+        )
+    if aggregation == "mean":
+        return scaled_similarity.mean(dim=2)
+    if aggregation == "max":
+        return scaled_similarity.max(dim=2).values
+    raise ValueError(
+        "Unsupported prototype aggregation: "
+        f"{aggregation!r}; expected one of {sorted(PROTO_AGGREGATIONS)}."
+    )
 
 
 ABLATION_MODE_SPECS = {
@@ -315,12 +333,24 @@ def mine_reliable_teacher_features(
     tau_w=0.8,
     max_features_per_class=None,
     storage_dtype=torch.float32,
+    apply_sample_filter=True,
 ):
     teacher.eval()
     hook = register_avgpool_hook(teacher)
     max_entropy = math.log(num_classes)
 
-    print(log_msg(f"Phase 1: Mining high-purity features (tau_w={tau_w})...", "INFO"))
+    if apply_sample_filter:
+        print(log_msg(
+            f"Phase 1: Mining filtered features "
+            f"(teacher-correct and tau_w={tau_w})...",
+            "INFO",
+        ))
+    else:
+        print(log_msg(
+            "Phase 1: Mining all training features by ground-truth class "
+            "(prototype sample filter disabled)...",
+            "INFO",
+        ))
     class_features = {c: [] for c in range(num_classes)}
 
     with torch.no_grad():
@@ -347,7 +377,11 @@ def mine_reliable_teacher_features(
 
             for i in range(image_weak.size(0)):
                 c = target[i].item()
-                if conf_w[i].item() >= tau_w and preds[i].item() == c:
+                keep_feature = (
+                    not apply_sample_filter
+                    or (conf_w[i].item() >= tau_w and preds[i].item() == c)
+                )
+                if keep_feature:
                     if (
                         max_features_per_class is None
                         or len(class_features[c]) < max_features_per_class
@@ -369,7 +403,7 @@ def mine_reliable_teacher_features(
     max_count = max(selected_counts.values())
     mean_count = sum(selected_counts.values()) / num_classes
     print(log_msg(
-        "Reliable feature counts per class: "
+        "Prototype feature counts per class: "
         f"min={min_count}, mean={mean_count:.1f}, max={max_count}",
         "INFO",
     ))
@@ -438,6 +472,7 @@ def precompute_multicenter_prototypes(
     tau_w=0.8,
     max_features_per_class=None,
     storage_dtype=torch.float32,
+    apply_sample_filter=True,
 ):
     class_features = mine_reliable_teacher_features(
         teacher=teacher,
@@ -447,6 +482,7 @@ def precompute_multicenter_prototypes(
         tau_w=tau_w,
         max_features_per_class=max_features_per_class,
         storage_dtype=storage_dtype,
+        apply_sample_filter=apply_sample_filter,
     )
     return build_multicenter_prototypes(
         class_features=class_features,
@@ -458,10 +494,170 @@ def precompute_multicenter_prototypes(
 
 
 # ==============================================================================
+# 4.1. Diagnostic: reliable-feature retention scan
+def create_proto_retention_scan_output_paths(experiment_name):
+    output_dir = os.path.join(_project_root(), "output", experiment_name)
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = f"prototype_retention_scan_{timestamp}"
+    return (
+        os.path.join(output_dir, f"{stem}.csv"),
+        os.path.join(output_dir, f"{stem}.md"),
+    )
+
+
+def run_proto_retention_scan(
+    teacher,
+    train_loader,
+    num_classes,
+    tau_values,
+    experiment_name,
+    device="cuda",
+):
+    """Measure offline prototype-mining coverage without training a student."""
+    if not tau_values:
+        raise ValueError("At least one prototype reliability threshold is required.")
+    if any(tau > 1.0 for tau in tau_values):
+        raise ValueError("Prototype reliability thresholds must be in (0, 1].")
+
+    csv_path, markdown_path = create_proto_retention_scan_output_paths(
+        experiment_name
+    )
+    fieldnames = [
+        "tau_proto",
+        "total_samples",
+        "teacher_correct",
+        "teacher_accuracy",
+        "confidence_pass",
+        "selected_samples",
+        "selected_ratio_total",
+        "selected_ratio_correct",
+        "min_selected_per_class",
+        "mean_selected_per_class",
+        "max_selected_per_class",
+    ]
+    rows = []
+    total_samples = 0
+    teacher_correct = 0
+    confidence_pass = {tau: 0 for tau in tau_values}
+    selected_counts = {
+        tau: [0 for _ in range(num_classes)] for tau in tau_values
+    }
+    max_entropy = math.log(num_classes)
+
+    teacher.eval()
+    print(log_msg(
+        "Scanning teacher training-set retention; student training will not start.",
+        "INFO",
+    ))
+    with torch.no_grad():
+        for batch in tqdm(train_loader, desc="Prototype retention scan"):
+            image_data = batch[0]
+            image_weak = (
+                image_data[0]
+                if isinstance(image_data, (list, tuple))
+                else image_data
+            )
+            images = image_weak.to(device, non_blocking=True)
+            targets = batch[1].to(device, non_blocking=True)
+
+            teacher_output = teacher(images)
+            logits, _ = split_logits_and_pooled_feature(teacher_output)
+            probs = F.softmax(logits, dim=1)
+            entropy = -torch.sum(
+                probs * torch.log(probs.clamp_min(1e-8)), dim=1
+            )
+            confidence = 1.0 - entropy / max_entropy
+            predictions = torch.argmax(probs, dim=1)
+            correct_mask = predictions.eq(targets)
+
+            total_samples += targets.numel()
+            teacher_correct += correct_mask.sum().item()
+            for tau in tau_values:
+                confidence_mask = confidence >= tau
+                selected_mask = correct_mask & confidence_mask
+                confidence_pass[tau] += confidence_mask.sum().item()
+                selected_targets = targets[selected_mask].detach().cpu().tolist()
+                for class_index in selected_targets:
+                    selected_counts[tau][class_index] += 1
+
+    if total_samples == 0:
+        raise RuntimeError("The training loader returned no samples.")
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for tau in tau_values:
+            counts = selected_counts[tau]
+            selected = sum(counts)
+            row = {
+                "tau_proto": tau,
+                "total_samples": total_samples,
+                "teacher_correct": teacher_correct,
+                "teacher_accuracy": 100.0 * teacher_correct / total_samples,
+                "confidence_pass": confidence_pass[tau],
+                "selected_samples": selected,
+                "selected_ratio_total": 100.0 * selected / total_samples,
+                "selected_ratio_correct": (
+                    100.0 * selected / teacher_correct if teacher_correct else 0.0
+                ),
+                "min_selected_per_class": min(counts),
+                "mean_selected_per_class": sum(counts) / num_classes,
+                "max_selected_per_class": max(counts),
+            }
+            rows.append(row)
+        writer.writerows(rows)
+
+    with open(markdown_path, "w", encoding="utf-8") as file:
+        file.write("# 原型样本保留率扫描\n\n")
+        file.write(
+            "筛选条件：教师弱视图预测正确，且归一化熵置信度 "
+            "$r_i^T \\geq \\tau_{\\mathrm{proto}}$。\n\n"
+        )
+        file.write(
+            "| $\\tau_{\\mathrm{proto}}$ | 教师准确率 (%) | "
+            "置信度达标 | 保留样本 | 占训练集 (%) | "
+            "占教师正确样本 (%) | 每类最小/均值/最大 |\n"
+        )
+        file.write("|---:|---:|---:|---:|---:|---:|---:|\n")
+        for row in rows:
+            file.write(
+                f"| {row['tau_proto']:.2f} | {row['teacher_accuracy']:.2f} | "
+                f"{row['confidence_pass']} | {row['selected_samples']} | "
+                f"{row['selected_ratio_total']:.2f} | "
+                f"{row['selected_ratio_correct']:.2f} | "
+                f"{row['min_selected_per_class']}/"
+                f"{row['mean_selected_per_class']:.1f}/"
+                f"{row['max_selected_per_class']} |\n"
+            )
+        file.write(
+            "\n说明：统计不应用 `PROTO_MAX_SAMPLES_PER_CLASS` 上限，"
+            "因此反映的是置信度与标签正确性筛选本身的覆盖率。\n"
+        )
+
+    print(log_msg(f"Prototype retention CSV: {csv_path}", "INFO"))
+    print(log_msg(f"Prototype retention Markdown: {markdown_path}", "INFO"))
+    print(log_msg(
+        f"Teacher training accuracy: {100.0 * teacher_correct / total_samples:.2f}% "
+        f"({teacher_correct}/{total_samples})",
+        "INFO",
+    ))
+    for row in rows:
+        print(log_msg(
+            f"tau_proto={row['tau_proto']:.2f}: selected="
+            f"{row['selected_samples']}/{row['total_samples']} "
+            f"({row['selected_ratio_total']:.2f}%), "
+            f"among teacher-correct={row['selected_ratio_correct']:.2f}%",
+            "INFO",
+        ))
+    return rows
+
+
 # 4. Evaluate N*K multi-center prototypes
 # ==============================================================================
 def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, device='cuda',
-                           view='clean', repeats=1, return_metrics=False):
+                           view='clean', repeats=1, return_metrics=False,
+                           aggregation='logmeanexp'):
     if view not in {'clean', 'weak', 'strong'}:
         raise ValueError(f"Unsupported prototype evaluation view: {view}")
     if repeats < 1:
@@ -477,7 +673,8 @@ def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, d
     prototypes_norm = F.normalize(prototypes_nk, dim=-1)
 
     print(log_msg(
-        "Evaluating K-Means prototypes with Log-Mean-Exp "
+        "Evaluating K-Means prototypes with "
+        f"{aggregation} aggregation "
         f"(K={k_num}, tau_p={proto_temp}, view={view}, repeats={repeats})...",
         "INFO",
     ))
@@ -507,7 +704,9 @@ def evaluate_prototypes_nk(teacher, val_loader, prototypes_nk, proto_temp=0.5, d
                     features_norm,
                     prototypes_norm.view(num_classes * k_num, feat_dim).t(),
                 ).view(-1, num_classes, k_num)
-                class_logits = torch.logsumexp(sim / proto_temp, dim=2) - math.log(k_num)
+                class_logits = aggregate_prototype_logits(
+                    sim / proto_temp, aggregation
+                )
                 preds = torch.argmax(class_logits, dim=1)
                 teacher_preds = torch.argmax(logits_teacher, dim=1)
 
@@ -937,6 +1136,22 @@ class CRLD_Proto(Distiller):
         self.proto_temp = float(getattr(cfg.CRLD, 'PROTO_TEMP', 0.5))
         if self.proto_temp <= 0.0:
             raise ValueError("PROTO_TEMP must be positive.")
+        self.proto_aggregation = str(
+            getattr(cfg.CRLD, 'PROTO_AGGREGATION', 'logmeanexp')
+        ).lower().replace('-', '')
+        if self.proto_aggregation not in PROTO_AGGREGATIONS:
+            raise ValueError(
+                "CRLD.PROTO_AGGREGATION must be one of "
+                f"{sorted(PROTO_AGGREGATIONS)}."
+            )
+        self.proto_anchor = str(
+            getattr(cfg.CRLD, 'PROTO_ANCHOR', 'weak_teacher')
+        ).lower().replace('-', '_')
+        if self.proto_anchor not in {'weak_teacher', 'ground_truth'}:
+            raise ValueError(
+                "CRLD.PROTO_ANCHOR must be either 'weak_teacher' or "
+                "'ground_truth'."
+            )
 
         self.proto_enabled = bool(getattr(cfg.CRLD, 'PROTO_ENABLED', True))
         self.proto_fusion_mode = str(
@@ -987,7 +1202,7 @@ class CRLD_Proto(Distiller):
         proto_flat = self.prototypes.view(num_classes * k_num, feat_dim)
         sim = torch.matmul(features, proto_flat.t()).view(-1, num_classes, k_num)
         scaled_sim = sim / self.proto_temp
-        return torch.logsumexp(scaled_sim, dim=2) - math.log(k_num)
+        return aggregate_prototype_logits(scaled_sim, self.proto_aggregation)
 
     def _soft_target_kd(self, logits_student, target_prob):
         log_prob = F.log_softmax(logits_student / self.temperature, dim=1)
@@ -1037,11 +1252,14 @@ class CRLD_Proto(Distiller):
             prob_t_s_fused = prob_t_s_soft
             if self.proto_enabled:
                 prob_sim = F.softmax(self._prototype_logits(f_s_t), dim=1)
-                weak_teacher_pred = probs_t_w.argmax(dim=1)
+                if self.proto_anchor == 'ground_truth':
+                    proto_anchor = target.to(probs_t_w.device).long()
+                else:
+                    proto_anchor = probs_t_w.argmax(dim=1)
                 prob_t_s_fused = positive_gain_proto_fusion(
                     prob_t_s_soft,
                     prob_sim,
-                    weak_teacher_pred,
+                    proto_anchor,
                     uncertainty_t_s,
                     fusion_scale=self.proto_fusion_scale,
                     fusion_mode=self.proto_fusion_mode,
@@ -1162,6 +1380,8 @@ def append_method_metadata(
             f"ablation_description: {ablation_description}\n",
             f"prototype_enabled: {proto_enabled}\n",
             f"prototype_fusion_mode: {getattr(method_cfg, 'PROTO_FUSION_MODE', 'gated')}\n",
+            f"prototype_aggregation: {getattr(method_cfg, 'PROTO_AGGREGATION', 'logmeanexp')}\n",
+            f"prototype_anchor: {getattr(method_cfg, 'PROTO_ANCHOR', 'weak_teacher')}\n",
             f"prototype_fusion_scale: {float(getattr(method_cfg, 'PROTO_FUSION_SCALE', 0.5)):.3f}\n",
             "prototype_gates: "
             f"uncertainty={bool(getattr(method_cfg, 'PROTO_GATE_UNCERTAINTY', True))}, "
@@ -1269,8 +1489,9 @@ def input_size_for_dataset(dataset_type):
 def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
          proto_scan_taus=None, proto_scan_seed=42, proto_scan_split_seed=2026,
          proto_scan_val_per_class=20, proto_scan_strong_repeats=1,
+         proto_retention_scan=False, proto_retention_taus=None,
          training_seed=DEFAULT_TRAINING_SEED,
-         ablation_mode=None):
+         ablation_mode=None, proto_no_filter=False):
     if cfg.DISTILLER.TYPE not in PROTO_DISTILLER_TYPES:
         raise ValueError(
             f"Unsupported distiller type {cfg.DISTILLER.TYPE!r} for "
@@ -1317,6 +1538,13 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
         "INFO",
     ))
     print(log_msg(f"Training seed: {training_seed}", "INFO"))
+    if proto_no_filter:
+        print(log_msg(
+            "Prototype sample filter disabled: all training samples are "
+            "assigned by ground-truth class; PROTO_TAU_W and teacher "
+            "correctness are ignored for prototype construction.",
+            "INFO",
+        ))
     train_loader, val_loader, _, num_classes = get_dataset_strong(cfg)
 
     print(log_msg("Loading models...", "INFO"))
@@ -1327,6 +1555,25 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
     # Feature-dimension probing must not update the pretrained teacher's
     # BatchNorm running statistics before prototype mining and distillation.
     model_teacher.eval()
+
+    if proto_retention_scan:
+        print(log_msg(
+            "Prototype retention scan enabled. Student distillation will not start.",
+            "INFO",
+        ))
+        run_proto_retention_scan(
+            teacher=model_teacher,
+            train_loader=train_loader,
+            num_classes=num_classes,
+            tau_values=proto_retention_taus,
+            experiment_name=experiment_name,
+            device="cuda",
+        )
+        print(log_msg(
+            "Prototype retention scan finished. Exiting before prototype construction.",
+            "INFO",
+        ))
+        return
 
     proto_enabled = bool(getattr(method_cfg, 'PROTO_ENABLED', True))
     feat_dim = None
@@ -1395,8 +1642,11 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
                 device='cuda',
                 feature_dim=feat_dim,
                 tau_w=tau_w,
-                max_features_per_class=max_proto_samples,
+                max_features_per_class=(
+                    None if proto_no_filter else max_proto_samples
+                ),
                 storage_dtype=storage_dtype,
+                apply_sample_filter=not proto_no_filter,
             )
 
             evaluate_prototypes_nk(
@@ -1405,6 +1655,9 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
                 prototypes_nk,
                 proto_temp=proto_temp,
                 device='cuda',
+                aggregation=str(
+                    getattr(method_cfg, 'PROTO_AGGREGATION', 'logmeanexp')
+                ).lower().replace('-', ''),
             )
 
         restore_rng_state(training_rng_state)
@@ -1421,7 +1674,9 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
         print(log_msg(
             prototype_message + " "
             f"Prototype construction=K-Means, K={K_subcenters}, "
-            f"tau_p={proto_temp}, seed={training_seed}.",
+            f"tau_p={proto_temp}, "
+            f"sample_filter={'disabled' if proto_no_filter else 'enabled'}, "
+            f"seed={training_seed}.",
             "INFO",
         ))
     else:
@@ -1490,6 +1745,23 @@ if __name__ == "__main__":
         help="Quickly scan prototype temperature and reliability threshold; do not train a student.",
     )
     parser.add_argument(
+        "--proto-retention-scan",
+        action="store_true",
+        help=(
+            "Measure teacher training-set accuracy and reliable-feature retention "
+            "for several PROTO_TAU_W values; do not train a student."
+        ),
+    )
+    parser.add_argument(
+        "--proto-no-filter",
+        action="store_true",
+        help=(
+            "Disable offline prototype sample filtering. All training samples "
+            "are assigned by ground-truth class; PROTO_TAU_W and teacher "
+            "correctness are ignored."
+        ),
+    )
+    parser.add_argument(
         "--proto-scan-temps",
         type=parse_positive_float_csv,
         default=[0.35, 0.50, 0.65],
@@ -1503,6 +1775,13 @@ if __name__ == "__main__":
         metavar="W1,W2,...",
         help="Reliable-feature thresholds used by --proto-scan.",
     )
+    parser.add_argument(
+        "--proto-retention-taus",
+        type=parse_positive_float_csv,
+        default=[0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95],
+        metavar="W1,W2,...",
+        help="Prototype reliability thresholds used by --proto-retention-scan.",
+    )
     parser.add_argument("--proto-scan-seed", type=int, default=42)
     parser.add_argument("--proto-scan-split-seed", type=int, default=2026)
     parser.add_argument("--proto-scan-val-per-class", type=int, default=20)
@@ -1510,16 +1789,23 @@ if __name__ == "__main__":
     parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
-    if args.proto_scan and args.resume:
-        parser.error("--resume cannot be combined with a prototype-only diagnostic mode.")
-    if args.proto_scan and args.ablation_mode is not None:
-        parser.error("--proto-scan cannot be combined with --ablation-mode.")
+    diagnostic_mode = args.proto_scan or args.proto_retention_scan
+    if diagnostic_mode and args.resume:
+        parser.error("A prototype-only diagnostic mode cannot be combined with --resume.")
+    if diagnostic_mode and args.proto_no_filter:
+        parser.error("--proto-no-filter is only valid for a training run.")
+    if diagnostic_mode and args.ablation_mode is not None:
+        parser.error("A prototype-only diagnostic mode cannot be combined with --ablation-mode.")
+    if args.proto_scan and args.proto_retention_scan:
+        parser.error("--proto-scan and --proto-retention-scan are mutually exclusive.")
     if args.proto_scan_val_per_class < 1:
         parser.error("--proto-scan-val-per-class must be at least 1.")
     if args.proto_scan_strong_repeats < 1:
         parser.error("--proto-scan-strong-repeats must be at least 1.")
     if any(tau > 1.0 for tau in args.proto_scan_taus):
         parser.error("--proto-scan-taus values must be in (0, 1].")
+    if any(tau > 1.0 for tau in args.proto_retention_taus):
+        parser.error("--proto-retention-taus values must be in (0, 1].")
 
     cfg.defrost()
     cfg.set_new_allowed(True)
@@ -1540,6 +1826,9 @@ if __name__ == "__main__":
         proto_scan_split_seed=args.proto_scan_split_seed,
         proto_scan_val_per_class=args.proto_scan_val_per_class,
         proto_scan_strong_repeats=args.proto_scan_strong_repeats,
+        proto_retention_scan=args.proto_retention_scan,
+        proto_retention_taus=args.proto_retention_taus,
         training_seed=args.seed,
         ablation_mode=args.ablation_mode,
+        proto_no_filter=args.proto_no_filter,
     )

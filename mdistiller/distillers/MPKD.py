@@ -33,6 +33,21 @@ def _normalize_probability(probability):
     return probability / probability.sum(dim=1, keepdim=True).clamp_min(1e-8)
 
 
+def _aggregate_prototype_logits(scaled_similarity, aggregation="logmeanexp"):
+    aggregation = str(aggregation).lower().replace("-", "")
+    if aggregation == "logmeanexp":
+        return torch.logsumexp(scaled_similarity, dim=2) - math.log(
+            scaled_similarity.size(2)
+        )
+    if aggregation == "mean":
+        return scaled_similarity.mean(dim=2)
+    if aggregation == "max":
+        return scaled_similarity.max(dim=2).values
+    raise ValueError(
+        "MPKD.PROTO_AGGREGATION must be one of logmeanexp, mean, or max."
+    )
+
+
 def _kd_from_probability(logits_student, target_probability, temperature):
     log_probability = F.log_softmax(logits_student / temperature, dim=1)
     target_probability = _normalize_probability(target_probability)
@@ -219,6 +234,13 @@ class MPKD(Distiller):
             raise ValueError("MPKD loss weights must be non-negative.")
 
         self.proto_temp = float(getattr(cfg.MPKD, "PROTO_TEMP", 0.5))
+        self.proto_aggregation = str(
+            getattr(cfg.MPKD, "PROTO_AGGREGATION", "logmeanexp")
+        ).lower().replace("-", "")
+        if self.proto_aggregation not in {"logmeanexp", "mean", "max"}:
+            raise ValueError(
+                "MPKD.PROTO_AGGREGATION must be one of logmeanexp, mean, or max."
+            )
         self.proto_fusion_scale = float(
             getattr(cfg.MPKD, "PROTO_FUSION_SCALE", 0.5)
         )
@@ -276,8 +298,9 @@ class MPKD(Distiller):
         similarities = torch.matmul(feature, centers.t()).view(
             -1, class_count, center_count
         )
-        logits = torch.logsumexp(similarities / self.proto_temp, dim=2)
-        logits = logits - math.log(center_count)
+        logits = _aggregate_prototype_logits(
+            similarities / self.proto_temp, self.proto_aggregation
+        )
         return F.softmax(logits, dim=1)
 
     def _fuse_targets(

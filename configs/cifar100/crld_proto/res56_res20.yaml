@@ -27,7 +27,6 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  # 当前正式最好：72.36%（seed=42，教师 BN 修复后完整复验）。
   TEMPERATURE: 3.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 1.0
@@ -35,5 +34,7 @@ CRLD:
   TAU_W: 0.8
   TAU_S: 0.4
   PROTO_TEMP: 0.35
-  PROTO_TAU_W: 0.75
+  PROTO_TAU_W: 0.6
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.5
+  PROTO_AGGREGATION: "logmeanexp"

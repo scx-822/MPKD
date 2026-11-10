@@ -9,7 +9,7 @@
 - `MPKD`：将同一原型修正模块适配到 `KD`、`DKD` 和 `NKD` 的兼容入口。
 - 原始 `KD`、`DKD`、`NKD`、`CRLD` 训练入口均保留，互不覆盖。
 
-当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心，不使用 GLVQ。论文草稿和逐轮实验记录位于 `experiments/`。
+当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心，论文草稿和逐轮实验记录位于 `experiments/`。
 
 ## 目录结构
 
@@ -133,15 +133,14 @@ python tools/export_paper_docx.py --help
 output/<project>/<tag>/
 ```
 
-每个实验目录中的 `worklog.txt` 是准确率和最佳轮次的原始依据。实验资料索引见 `experiments/README.md`，结构化结果见 `experiments/RESULTS.md`，详细历史记录见 `experiments/log.md`，实验协议和文件说明见 `experiments/PROTOCOL.md`。
+每个实验目录中的 `worklog.txt` 是准确率和最佳轮次的原始依据。实验资料索引见 `experiments/README.md`，结果与详细记录统一见 `experiments/log.md`，实验协议和文件说明见 `experiments/PROTOCOL.md`。
 
 `output/_archive/` 只存放 1 epoch 冒烟和未采用的调参候选，不参与正式结果汇总。
 
-## 论文材料
+## 实验材料
 
-- `experiments/MPKD论文草稿.md`：中文论文草稿。
-- `experiments/MPKD论文草稿.docx`：Word 版本。
-- `experiments/CRLD-Proto写作结构分析.md`：写作结构参考。
+- `experiments/log.md`：结构化结果、实验状态、逐轮日志和参数汇总。
+- `experiments/PROTOCOL.md`：运行协议与文件说明。
 - `experiments/robustness/`：鲁棒性分析数据和图表。
 
 ## 引用

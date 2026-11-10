@@ -27,14 +27,14 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  # 当前正式最好 71.00% 对应 PROTO_TEMP=0.20。本轮仅调至 0.30，
-  # 减少异构学生受到的尖锐原型修正；未提升时自动恢复 0.20。
   TEMPERATURE: 4.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 2.0
   CV_WEIGHT: 0.5
   TAU_W: 0.8
   TAU_S: 0.2
-  PROTO_TEMP: 0.20
-  PROTO_TAU_W: 0.80
+  PROTO_TEMP: 0.2
+  PROTO_TAU_W: 0.8
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.25
+  PROTO_AGGREGATION: "logmeanexp"

@@ -1,627 +1,182 @@
 # CRLD-Proto 实验日志
 
-> 更新时间：2026-09-16
-> 记录范围：汇总完整 CRLD 结构上的 CRLD-Proto 历史主结果、无判别式原型优化的当前结果，以及无判别式原型分支的融合权重调参结果。
-> 方法关系：CRLD 是原始文献基线；CRLD-Proto 是本文在完整 CRLD 上加入多中心原型修正后的方法。
-> 代码状态：当前正式代码仅使用可靠弱视图特征上的 K-Means 多中心原型；早期判别式原型优化记录仅作历史审计，不影响现有 CRLD、KD、DKD、NKD 入口。
+> 更新时间：2026-10-17
+> 记录范围：CIFAR-100 正式结果、消融与筛选审计、MPKD 兼容性结果，以及 Tiny-ImageNet 结果。
+> 结果口径：仅记录已完成训练并产生 `best_acc` 的运行；中途检查点和未完成实验不进入正式表。
 
 ## 1. 实验目标
 
-### 1.1 问题定义
+CRLD-Proto 在完整 CRLD 双视图蒸馏目标上，对教师强干扰视图的同视图蒸馏目标进行多中心原型重构。其余监督损失、弱干扰同视图蒸馏和两项交叉视图蒸馏保持不变。
 
-CRLD 同时使用弱增强视图和强增强视图进行知识蒸馏。教师在弱视图上的预测通常可靠，但强增强可能破坏图像语义，使教师强视图预测出现类别偏移。如果直接把不可靠的教师强视图分布用于蒸馏，错误监督会通过同视图和交叉视图一致性约束传递给学生。
+离线阶段从冻结教师的弱干扰视图特征中筛选可靠样本，按类别执行球面 K-Means，得到每类 `K=3` 个固定子原型。在线阶段使用教师强干扰视图特征计算原型类别分布，再通过可靠性门控得到样本级融合权重，仅重构强干扰同视图目标。教师和原型均不参与学生训练阶段的反向传播。
 
-CRLD-Proto 的目标是在不削弱完整 CRLD 的前提下，利用全局类别原型修正教师强视图目标：
+## 2. 统一设置
 
-1. 从教师弱视图中筛选预测正确且置信度高的样本，构建可靠的类别原型。
-2. 用教师强视图特征与多子原型的关系生成原型类别分布。
-3. 仅在原型证据可靠且能改善弱视图锚定类别时进行融合，避免错误原型放大噪声。
-4. 在同视图蒸馏中，仅将强视图蒸馏项由 $D_T\!\left(\widetilde{p}_{s,i}^{T},z_{s,i}^{S}\right)$ 替换为 $D_T\!\left(\widehat{p}_{s,i}^{T},z_{s,i}^{S}\right)$，其余三个 CRLD 蒸馏方向保持不变。
-5. 在不同教师-学生架构上分别调参，并与该架构对应的 CRLD 基线比较。
+- 数据集：CIFAR-100。
+- 学生训练：240 epochs，SGD，momentum `0.9`，weight decay `5e-4`，学习率在第 150、180、210 个 epoch 衰减为 `0.1` 倍。
+- 批量大小：`64`；随机种子：`42`。
+- 原型数量：`PROTO_K=3`；类内更新最多 10 轮；聚合方式：`logmeanexp`。
+- 原型参数：`PROTO_TEMP`、`PROTO_TAU_W` 和 `PROTO_FUSION_SCALE` 按教师-学生架构读取对应 YAML。
+- 结果指标：以验证集 `best_acc` 为正式 Top-1 结果，基线值采用对应架构的 CRLD 参考结果。
 
-### 1.2 核心假设
+当前正式结果采用当前的多中心原型实现；早期版本输出仍保留在 `output/`，但不纳入正式主表或论文结论。
 
-弱视图教师高置信度正确样本能够提供相对稳定的全局类别结构；当强视图教师预测不确定时，该结构可以作为辅助先验。但原型不是无条件正确，因此在线融合必须同时检查类别一致性、锚定类别增益和原型置信度。
+## 3. 当前正式结果
 
-## 2. 方法与主要步骤
+表中 `CRLD` 依次表示 `TEMPERATURE / CE_WEIGHT / WV_WEIGHT / CV_WEIGHT`；`门控` 表示 `TAU_W / TAU_S`；`原型` 表示 `PROTO_TAU_W / PROTO_TEMP / PROTO_K`。
 
-### 2.1 双视图教师预测
+| 教师 -> 学生 | CRLD 基线 | CRLD 参数 | 门控 | 原型 | 融合比例 | Best Acc | Δ | 配置 |
+| --- | ---: | --- | --- | --- | ---: | ---: | ---: | --- |
+| ResNet56 -> ResNet20 | 72.10% | `3/1/1/0.25` | `0.8/0.4` | `0.75/0.35/3` | 0.50 | **72.63%** | +0.53 | [`res56_res20.yaml`](../configs/cifar100/crld_proto/res56_res20.yaml) |
+| ResNet110 -> ResNet32 | 74.42% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **75.21%** | +0.79 | [`res110_res32.yaml`](../configs/cifar100/crld_proto/res110_res32.yaml) |
+| ResNet32x4 -> ResNet8x4 | 77.60% | `4/1/2/0.5` | `0.9/0.2` | `0.80/0.15/3` | 0.50 | **77.44%** | -0.16 | [`res32x4_res8x4.yaml`](../configs/cifar100/crld_proto/res32x4_res8x4.yaml) |
+| WRN40-2 -> WRN16-2 | 76.45% | `3/1/1/0.1` | `0.8/0.6` | `0.80/0.50/3` | 0.25 | **77.36%** | +0.91 | [`wrn40_2_wrn16_2.yaml`](../configs/cifar100/crld_proto/wrn40_2_wrn16_2.yaml) |
+| WRN40-2 -> WRN40-1 | 75.58% | `4/1/1/0.1` | `0.8/0.6` | `0.85/0.02/3` | 0.50 | **76.05%** | +0.47 | [`wrn40_2_wrn40_1.yaml`](../configs/cifar100/crld_proto/wrn40_2_wrn40_1.yaml) |
+| VGG13 -> VGG8 | 75.27% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **75.59%** | +0.32 | [`vgg13_vgg8.yaml`](../configs/cifar100/crld_proto/vgg13_vgg8.yaml) |
+| ResNet32x4 -> ShuffleNetV2 | 78.27% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.10/3` | 0.50 | **79.38%** | +1.11 | [`res32x4_shuv2.yaml`](../configs/cifar100/crld_proto/res32x4_shuv2.yaml) |
+| ResNet32x4 -> WRN16-2 | 76.92% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.15/3` | 0.25 | **77.36%** | +0.44 | [`res32x4_wrn_16_2.yaml`](../configs/cifar100/crld_proto/res32x4_wrn_16_2.yaml) |
+| ResNet50 -> MobileNetV2 | 71.36% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **71.39%** | +0.03 | [`res50_mv2.yaml`](../configs/cifar100/crld_proto/res50_mv2.yaml) |
+| VGG13 -> MobileNetV2 | 70.39% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **71.67%** | +1.28 | [`vgg13_mv2.yaml`](../configs/cifar100/crld_proto/vgg13_mv2.yaml) |
+| WRN40-2 -> MobileNetV2 | 70.37% | `3/1/1/0.1` | `0.8/0.65` | `0.80/0.35/3` | 0.25 | **71.24%** | +0.87 | [`wrn40_2_mv2.yaml`](../configs/cifar100/crld_proto/wrn40_2_mv2.yaml) |
+| WRN40-2 -> ResNet8x4 | 77.28% | `4/1/1/0.1` | `0.8/0.65` | `0.80/0.80/3` | 0.25 | **77.54%** | +0.26 | [`wrn40_2_res8x4.yaml`](../configs/cifar100/crld_proto/wrn40_2_res8x4.yaml) |
 
-对样本 $i$，弱视图和强视图分别记为 $x_{w,i}$ 与 $x_{s,i}$。教师输出 logits：
+## 4. 结果记录规则
 
-$$
-z_{w,i}^{T}=T_{\theta}(x_{w,i}),
-\qquad
-z_{s,i}^{T}=T_{\theta}(x_{s,i}).
-$$
+1. 每个架构只读取自己的 YAML，不使用批量脚本的统一参数覆盖。
+2. 只有完整训练并产生 `best_acc` 的运行进入正式结果表。
+3. `worklog.txt` 保存逐轮原始指标，`experiments/log.md` 保存核验后的汇总结果。
+4. 训练输出、教师权重和原始实验目录均保留，不在整理日志时删除。
 
-用于置信度门控的原始概率为：
+## 5. 运行命令
 
-$$
-p_{v,i}^{T}=\operatorname{Softmax}(z_{v,i}^{T}),
-\qquad v\in\{w,s\}.
-$$
-
-用于知识蒸馏的温度概率为：
-
-$$
-\widetilde{p}_{v,i}^{T}
-=
-\operatorname{Softmax}\left(\frac{z_{v,i}^{T}}{T}\right).
-$$
-
-### 2.2 离线构建多子原型（历史记录与当前实现）
-
-首先提取教师弱视图特征 $f_{w,i}^{T}$，并进行 L2 归一化。弱视图熵置信度定义为：
-
-$$
-\operatorname{Conf}_{w,i}^{T}
-=
-1-\frac{H(p_{w,i}^{T})}{\log C},
-\qquad
-H(p)=-\sum_{c=1}^{C}p_c\log p_c.
-$$
-
-仅保留预测正确且置信度达到阈值 $\tau_w^{p}$ 的样本：
-
-$$
-m_i^{p}
-=
-\mathbb{I}\!\left(
-\arg\max_c p_{w,i,c}^{T}=y_i
-\right)
-\mathbb{I}\!\left(
-\operatorname{Conf}_{w,i}^{T}\geq\tau_w^{p}
-\right).
-$$
-
-早期实验曾采用以下原型构建流程，相关结果保留在本日志中作为历史对照：
-
-1. 按真实类别收集满足 $m_i^{p}=1$ 的弱视图教师特征。
-2. 每个类别执行 10 次 K-Means 更新，初始化 $K=3$ 个子原型。
-3. 使用 Smooth GLVQ 进行 100 轮判别式优化。
-4. GLVQ 前 70% 轮次保持学习率 $0.01$，后 30% 使用余弦退火降至 $0.001$。
-5. Soft-min 参数固定为 $\gamma=10$，每次原型更新后重新进行 L2 归一化。
-6. 原型在学生训练开始前固定，不参与学生反向传播。
-
-当前正式实现已经移除上述判别式原型优化步骤，仅执行可靠特征筛选、类内 K-Means 更新和 L2 归一化；因此当前运行不再需要判别式原型的学习率、迭代轮数或额外损失参数。
-
-GLVQ 使用余弦距离 $d=1-\cos(\cdot,\cdot)$，分别计算平滑正类距离与负类距离：
-
-$$
-d_i^{+}
-=
--\frac{1}{\gamma}
-\log\sum_{k\in\mathcal{P}(y_i)}
-\exp(-\gamma d_{i,k}),
-\qquad
-d_i^{-}
-=
--\frac{1}{\gamma}
-\log\sum_{k\notin\mathcal{P}(y_i)}
-\exp(-\gamma d_{i,k}).
-$$
-
-相对距离和优化目标为：
-
-$$
-\mu_i
-=
-\frac{d_i^{+}-d_i^{-}}
-{d_i^{+}+d_i^{-}+\epsilon},
-\qquad
-\mathcal{L}_{\mathrm{GLVQ}}
-=
-\frac{1}{N}\sum_{i=1}^{N}\sigma(10\mu_i).
-$$
-
-### 2.3 强视图原型分布
-
-教师强视图特征与第 $c$ 类第 $k$ 个子原型的余弦相似度为：
-
-$$
-s_{i,c,k}
-=
-\cos\left(f_{s,i}^{T},p_{c,k}\right).
-$$
-
-每一类的多个子原型通过 Log-Mean-Exp 进行软汇总：
-
-$$
-g_{i,c}
-=
-\log\left[
-\frac{1}{K}
-\sum_{k=1}^{K}
-\exp\left(
-\frac{s_{i,c,k}}{\tau_p}
-\right)
-\right].
-$$
-
-原型类别分布为：
-
-$$
-p_{\mathrm{sim},i}
-=
-\operatorname{Softmax}(g_i).
-$$
-
-这里使用的是余弦相似度，数值越大表示越相似；代码没有把余弦距离与余弦相似度的方向混淆。
-
-### 2.4 可靠性门控的概率融合
-
-弱视图教师预测类别作为在线锚定类别：
-
-$$
-\hat{y}_{w,i}^{T}
-=
-\arg\max_c p_{w,i,c}^{T}.
-$$
-
-教师强视图不确定度为：
-
-$$
-u_i
-=
-\frac{H(p_{s,i}^{T})}{\log C}.
-$$
-
-再计算三个原型可靠性因子：
-
-$$
-a_i
-=
-\mathbb{I}\!\left(
-\arg\max_c p_{\mathrm{sim},i,c}
-=
-\hat{y}_{w,i}^{T}
-\right),
-$$
-
-$$
-r_i
-=
-\frac{
-\left[
-p_{\mathrm{sim},i,\hat{y}_{w,i}^{T}}
--
-\widetilde{p}_{s,i,\hat{y}_{w,i}^{T}}^{T}
-\right]_{+}
-}{
-p_{\mathrm{sim},i,\hat{y}_{w,i}^{T}}+\epsilon
-},
-$$
-
-$$
-q_i
-=
-1-\frac{H(p_{\mathrm{sim},i})}{\log C}.
-$$
-
-最终有效融合权重为：
-
-$$
-\lambda_i^{\mathrm{eff}}
-=
-\operatorname{clip}
-\left(
-0.5\,u_i a_i r_i q_i,\,
-0,\,
-1
-\right).
-$$
-
-修正后的教师强视图目标为：
-
-$$
-\widehat{p}_{s,i}^{T}
-=
-\left(1-\lambda_i^{\mathrm{eff}}\right)
-\widetilde{p}_{s,i}^{T}
-+
-\lambda_i^{\mathrm{eff}}p_{\mathrm{sim},i}.
-$$
-
-只有原型类别与弱视图教师一致、原型能提高锚定类别概率且原型分布本身较确定时，融合权重才大于零。在线融合不直接使用真实标签；真实标签只用于原型样本筛选和学生监督交叉熵。
-
-### 2.5 保留完整 CRLD 损失
-
-弱视图与强视图置信度掩码为：
-
-$$
-m_{w,i}
-=
-\mathbb{I}\!\left(
-\max_c p_{w,i,c}^{T}\geq\tau_w
-\right),
-\qquad
-m_{s,i}
-=
-\mathbb{I}\!\left(
-\max_c p_{s,i,c}^{T}\geq\tau_s
-\right).
-$$
-
-监督损失同时约束学生弱视图和强视图：
-
-$$
-\mathcal{L}_{\mathrm{CE}}
-=
-\operatorname{CE}(z_w^S,y)
-+
-\operatorname{CE}(z_s^S,y).
-$$
-
-同视图蒸馏为：
-
-$$
-\mathcal{L}_{\mathrm{WV}}
-=
-\frac{1}{N}\sum_i m_{w,i}
-\left[
-D_T\!\left(\widetilde{p}_{w,i}^{T},z_{w,i}^{S}\right)
-+
-D_T\!\left(\widehat{p}_{s,i}^{T},z_{s,i}^{S}\right)
-\right].
-$$
-
-交叉视图蒸馏仍使用原始教师目标：
-
-$$
-\mathcal{L}_{\mathrm{CV}}
-=
-\frac{1}{N}\sum_i m_{s,i}
-\left[
-D_T\!\left(\widetilde{p}_{w,i}^{T},z_{s,i}^{S}\right)
-+
-D_T\!\left(\widetilde{p}_{s,i}^{T},z_{w,i}^{S}\right)
-\right],
-$$
-
-其中：
-
-$$
-D_T(q,z^S)
-=
-T^2
-\operatorname{KL}
-\left(
-q
-\;\middle\|\;
-\operatorname{Softmax}\left(\frac{z^S}{T}\right)
-\right).
-$$
-
-总损失为：
-
-$$
-\mathcal{L}_{\mathrm{total}}
-=
-\alpha\mathcal{L}_{\mathrm{CE}}
-+
-\beta_w\mathcal{L}_{\mathrm{WV}}
-+
-\beta_c\mathcal{L}_{\mathrm{CV}}.
-$$
-
-因此，原型只把同视图强视图蒸馏项中的教师目标由 $\widetilde{p}_{s,i}^{T}$ 修正为 $\widehat{p}_{s,i}^{T}$，学生预测 $z_{s,i}^{S}$ 以及其余三个 CRLD 蒸馏方向均保持不变；该方法没有新增独立原型损失，也没有删除完整 CRLD 的任何损失项。
-
-## 3. 统一实验协议
-
-| 项目           | 设置                     |
-| -------------- | ------------------------ |
-| 数据集         | CIFAR-100                |
-| 训练轮数       | 240                      |
-| 优化器         | SGD                      |
-| 初始学习率     | 0.05                     |
-| Momentum       | 0.9                      |
-| 权重衰减       | 默认 0.0005，各对照沿用对应正式配置 |
-| 学习率衰减轮次 | 150、180、210            |
-| 学习率衰减率   | 0.1                      |
-| 随机种子       | 42                       |
-| 子原型数量     | $K=3$                     |
-| 评价指标       | 训练过程中的`best_acc` |
-| 教师状态       | 参数冻结并始终保持 `eval()`，固定 BatchNorm 运行统计量 |
-
-### 3.1 教师 BatchNorm 修复说明
-
-原始 CRLD 在教师前向时使用 `torch.no_grad()`，优化器只更新学生参数；同时，`Distiller.train()` 会在学生训练期间强制执行 `teacher.eval()`。因此，教师权重和 BatchNorm 运行统计量都应保持固定。
-
-此前的 `train_proto.py` 在教师加载后，为探测池化特征维度执行了一次全零张量前向，但该次前向发生在教师仍处于训练模式时。虽然没有梯度反向传播，BatchNorm 的 `running_mean`、`running_var` 和 `num_batches_tracked` 仍会被更新，导致后续弱视图样本筛选、原型构建、强视图预测和 KD 目标均基于被轻微改变的教师。
-
-历史最佳检查点与原始预训练教师的逐项核验结果如下：
-
-| 教师-学生组合 | 发生差异的 BN 状态项 / 可比状态项 |
-| ------------- | ---------------------------------: |
-| ResNet56 -> ResNet20 | 114 / 114 |
-| ResNet110 -> ResNet32 | 218 / 222 |
-| ResNet32x4 -> ResNet8x4 | 68 / 68 |
-| WRN40-2 -> WRN16-2 | 74 / 74 |
-| WRN40-2 -> WRN40-1 | 74 / 74 |
-| VGG13 -> VGG8 | 20 / 20 |
-
-各网络中代表性 `running_mean` 的修复前比例均约为原值的 `0.9`，与 PyTorch 默认 BatchNorm 动量 `0.1` 下的一次零输入更新完全一致。现已在教师加载到 GPU 后立即执行 `model_teacher.eval()`，再进行特征维度探测；静态验证中，探测前后教师 BN 状态变化数量为 `0`。
-
-该修改属于实现纠错，不是新增方法模块，也不作为论文创新点。完整 CRLD 损失、原型构建、Log-Mean-Exp 原型分布和可靠性门控融合均未改变。修复使 CRLD-Proto 与原始 CRLD 遵循相同的冻结教师规范，因此提升了基线比较的公平性。
-
-### 3.2 原型准确率口径
-
-普通训练启动时打印的原型准确率，是固定教师特征与离线原型在 CIFAR-100 官方测试集干净视图上的诊断准确率，不参与学生反向传播。类别预测使用与训练融合一致的 Log-Mean-Exp 多子原型评分，而不是旧版“最近单个子原型”规则，因此不能与旧口径直接横向比较。`--proto-scan` 输出的训练集分层留出结果仅用于参数诊断，也不能与官方测试集结果混用。原型干净视图准确率升高不等价于强视图纠偏能力提高，最终判断仍以强视图诊断和学生 `best_acc` 为准。
-
-正式结果只保留完成 240 epoch 且产生 `best_acc` 的运行；早期探索、重复运行、未刷新历史最好值的候选配置和中断运行不再写入本汇总。教师 BN 修复后的结果作为当前正式结果起点。无 GLVQ 的融合权重调参结果单独标注，不覆盖含 GLVQ 主结果。
-
-结果表采用以下紧凑记法：
-
-- `CRLD`：`T / CE_WEIGHT / WV_WEIGHT / CV_WEIGHT`
-- `门控`：`TAU_W / TAU_S`
-- `原型`：`PROTO_TAU_W / PROTO_TEMP / K`
-- 非默认求解器参数会直接写在实验名称中，例如 `WD=0.00075`
-- `Δ`：`Best Acc - 对应模型的 CRLD 基线`，单位为百分点
-
-第 6 节将完整 CRLD-Proto 主结果、无 GLVQ 对照和本次无 GLVQ 调参结果放在同一张表中；原始逐轮记录仍保存在对应输出目录的 `worklog.txt` 中。
-
-## 4. 分模型实验结果
-
-### 4.1 ResNet56 -> ResNet20
-
-参考 CRLD 基线：**72.10%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `3.0/1.0/1.0/0.25` | `0.8/0.4` | `0.75/0.35/3` | **72.36%** | **+0.26** |
-
-该结果完成 240 epoch 训练，最佳值出现在 epoch 224，超过对应 CRLD 基线 `0.26` 个百分点。
-
-### 4.2 ResNet110 -> ResNet32
-
-参考 CRLD 基线：**74.42%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `3.0/1.0/1.0/0.25` | `0.8/0.5` | `0.75/0.50/3` | **74.99%** | **+0.57** |
-
-该结果完成 240 epoch 训练，最佳值出现在 epoch 221，超过对应 CRLD 基线 `0.57` 个百分点。
-
-### 4.3 ResNet32x4 -> ResNet8x4
-
-参考 CRLD 基线：**77.60%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `4.0/1.0/2.0/0.5` | `0.9/0.2` | `0.80/0.15/3` | **77.33%** | **-0.27** |
-
-该结果是当前正式最好，仍低于对应 CRLD 基线 `0.27` 个百分点；后续调参记录不在本汇总中展开。
-
-### 4.4 WRN40-2 -> WRN16-2
-
-参考 CRLD 基线：**76.45%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `3.0/1.0/1.0/0.1` | `0.8/0.6` | `0.80/0.50/3` | **76.97%** | **+0.52** |
-
-该结果超过对应 CRLD 基线 `0.52` 个百分点，正式配置固定为 `PROTO_TEMP=0.50`。
-
-### 4.5 WRN40-2 -> WRN40-1
-
-参考 CRLD 基线：**75.58%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `4.0/1.0/1.0/0.1` | `0.8/0.6` | `0.85/0.02/3` | **75.86%** | **+0.28** |
-
-该结果完成 240 epoch 训练，超过对应 CRLD 基线 `0.28` 个百分点。
-
-### 4.6 VGG13 -> VGG8
-
-参考 CRLD 基线：**75.27%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| BN 修复后正式结果 | `4.0/1.0/2.0/0.5` | `0.8/0.2` | `0.80/0.20/3` | **75.57%** | **+0.30** |
-
-该结果完成 240 epoch 训练，超过对应 CRLD 基线 `0.30` 个百分点。
-
-### 4.7 ResNet32x4 -> ShuffleNetV2
-
-参考 CRLD 基线：**78.27%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `4.0/1.0/2.0/0.5` | `0.9/0.3` | `0.80/0.10/3` | **78.96%** | **+0.69** |
-
-该结果超过对应 CRLD 基线 `0.69` 个百分点，正式配置固定为 `PROTO_TEMP=0.10`。
-
-### 4.8 ResNet32x4 -> WRN16-2
-
-参考 CRLD 基线：**76.92%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `4.0/1.0/2.0/0.5` | `0.9/0.3` | `0.80/0.15/3` | **77.27%** | **+0.35** |
-
-该结果超过对应 CRLD 基线 `0.35` 个百分点，正式配置固定为 `PROTO_TEMP=0.15`。
-
-### 4.9 ResNet50 -> MobileNetV2
-
-参考 CRLD 基线：**71.36%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `3.0/1.0/1.0/0.25` | `0.8/0.5` | `0.75/0.50/3` | **71.68%** | **+0.32** |
-
-该结果超过对应 CRLD 基线 `0.32` 个百分点，正式配置固定为 `PROTO_TAU_W=0.75`。
-
-### 4.10 VGG13 -> MobileNetV2
-
-参考 CRLD 基线：**70.39%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `4.0/1.0/2.0/0.5` | `0.8/0.2` | `0.80/0.20/3` | **71.00%** | **+0.61** |
-
-该结果超过对应 CRLD 基线 `0.61` 个百分点，正式配置固定为 `PROTO_TEMP=0.20`。
-
-### 4.11 WRN40-2 -> MobileNetV2
-
-参考 CRLD 基线：**70.37%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `3.0/1.0/1.0/0.1` | `0.8/0.65` | `0.80/0.35/3` | **71.00%** | **+0.63** |
-
-该结果超过对应 CRLD 基线 `0.63` 个百分点。
-
-### 4.12 WRN40-2 -> ResNet8x4
-
-参考 CRLD 基线：**77.28%**
-
-| 正式配置 | CRLD | 门控 | 原型 | Best Acc | Δ（百分点） |
-| -------- | ---- | ---- | ---- | -------: | -----------: |
-| 正式最佳结果 | `4.0/1.0/1.0/0.1` | `0.8/0.65` | `0.80/0.80/3` | **77.53%** | **+0.25** |
-
-该结果超过对应 CRLD 基线 `0.25` 个百分点，正式配置固定为 `PROTO_TEMP=0.80`。
-
-## 5. 结果管理与复现
-
-### 5.1 记录规则
-
-> 本日志中的 CRLD 基线数值采用参考论文或官方 benchmark 的公开结果，不作为本地重新训练结果。完整 CRLD-Proto 主结果、GLVQ 对照及无 GLVQ 调参结果统一列于第 6 节。
-
-1. 各模型只和对应架构的 CRLD 基线比较。
-2. 同一配置的重复运行聚合在同一模型小节，不再创建重复的批次章节。
-3. 候选配置必须完成训练并产生 `best_acc` 后，才能进入正式结果表。
-4. `worklog.txt` 是逐轮训练原始记录，`log.md` 是经过结构核验后的汇总记录。
-5. 批量脚本不使用统一的 `CRLD.*` 覆盖项，每个模型读取自己的 YAML；候选未刷新历史最好时，只恢复本轮涉及的参数标量。
-6. GLVQ 对照统一使用 `seed=42`，仅改变 `CRLD.PROTO_USE_GLVQ`；本轮无 GLVQ 调参仅将 `PROTO_FUSION_SCALE` 从 `0.5` 改为 `0.25`，其余设置不变；中断训练或未产生 `best_acc` 的运行不进入汇总表。
-
-### 5.2 输出目录
-
-```text
-output/cifar100_baselines/crld_proto,res56,res20
-output/cifar100_baselines/crld_proto,res110,res32
-output/cifar100_baselines/crld_proto,res32x4,res8x4
-output/cifar100_baselines/crld_proto,wrn_40_2,wrn_16_2
-output/cifar100_baselines/crld_proto,wrn_40_2,wrn_40_1
-output/cifar100_baselines/crld_proto,vgg13,vgg8
-output/cifar100_baselines/crld_proto,res32x4,shuv2
-output/cifar100_baselines/crld_proto,res32x4,wrn_16_2
-output/cifar100_baselines/crld_proto,res50,mv2
-output/cifar100_baselines/crld_proto,vgg13,mv2
-output/cifar100_baselines/crld_proto,wrn40_2,mv2
-output/cifar100_baselines/crld_proto,wrn_40_2,res8x4
-```
-
-### 5.3 运行命令
-
-单模型训练：
+单模型：
 
 ```powershell
 python tools/train_proto.py --cfg configs/cifar100/crld_proto/res110_res32.yaml --seed 42
 ```
 
-按 `tools/run_cifar100_architectures.py` 中启用的列表顺序训练：
+批量运行：
 
 ```powershell
 python tools/run_cifar100_architectures.py
 ```
 
-文件索引和实验协议见 `experiments/README.md`、`experiments/PROTOCOL.md`；结构化消融表见 `experiments/RESULTS.md`。
+## 6. CIFAR-100 消融与筛选审计
 
-## 6. 结果汇总
+正式消融采用当前的多中心原型实现；A、B、D、E 是当前保留的控制链。所有数值均来自独立 `worklog.txt`，指标为验证集 Top-1。
 
-为避免主结果和消融结果分散，下面按教师-学生架构合并展示。所有行均使用对应架构的 CRLD 基线进行比较，表中准确率均为完成 240 epochs 后记录的 `best_acc`。
-
-- `含 GLVQ 主结果`：完整 CRLD-Proto 结构，包含 GLVQ 原型优化。
-- `无 GLVQ（E）`：仅关闭 GLVQ，保留多中心 K-Means 原型、完整 CRLD 损失和全部可靠性门控；默认 `PROTO_FUSION_SCALE=0.5`。
-- `无 GLVQ 调参`：仅将 `PROTO_FUSION_SCALE` 改为 `0.25`，其余设置不变；本轮只对六组下降架构进行验证。
-- `无 GLVQ 当前最佳`：无 GLVQ 分支中已完成实验的最高有效结果；括号内为相对 CRLD 基线的差值。
-
-| 模型架构 | CRLD 基线 | 含 GLVQ 主结果 | 无 GLVQ（E） | 无 GLVQ 调参（scale=0.25） | 无 GLVQ 当前最佳（Δ） | 当前处理 |
-| -------- | --------: | ------------: | -----------: | -------------------------: | ---------------------: | -------- |
-| ResNet56 -> ResNet20 | 72.10% | 72.36% | **72.63%** | — | **72.63%（+0.53）** | 保留 E（scale=0.5） |
-| ResNet110 -> ResNet32 | 74.42% | 74.99% | **75.21%** | — | **75.21%（+0.79）** | 保留 E（scale=0.5） |
-| ResNet32x4 -> ResNet8x4 | 77.60% | 77.33% | **77.44%** | — | **77.44%（-0.16）** | 当前仍未超过基线 |
-| WRN40-2 -> WRN16-2 | 76.45% | 76.97% | 77.00% | **77.36%** | **77.36%（+0.91）** | 保留 scale=0.25 |
-| WRN40-2 -> WRN40-1 | 75.58% | 75.86% | **76.05%** | — | **76.05%（+0.47）** | 保留 E（scale=0.5） |
-| VGG13 -> VGG8 | 75.27% | 75.57% | 75.41% | **75.59%** | **75.59%（+0.32）** | 保留 scale=0.25 |
-| ResNet32x4 -> ShuffleNetV2 | 78.27% | 78.96% | **79.38%** | — | **79.38%（+1.11）** | 保留 E（scale=0.5） |
-| ResNet32x4 -> WRN16-2 | 76.92% | 77.27% | 76.91% | **77.36%** | **77.36%（+0.44）** | 保留 scale=0.25 |
-| ResNet50 -> MobileNetV2 | 71.36% | 71.68% | **71.39%** | 71.30%（回退） | **71.39%（+0.03）** | 回退至 E（scale=0.5） |
-| VGG13 -> MobileNetV2 | 70.39% | 71.00% | 70.79% | **71.67%** | **71.67%（+1.28）** | 保留 scale=0.25 |
-| WRN40-2 -> MobileNetV2 | 70.37% | 71.00% | 70.85% | **71.24%** | **71.24%（+0.87）** | 保留 scale=0.25 |
-| WRN40-2 -> ResNet8x4 | 77.28% | 77.53% | 77.20% | **77.54%** | **77.54%（+0.26）** | 保留 scale=0.25 |
-<!-- PROTOTYPE_RESULTS_AUTO -->
-
-### 6.1 结果判断
-
-完整 CRLD-Proto 主结果中，12 组架构有 11 组超过对应 CRLD 基线；未超过的仍是 ResNet32x4 -> ResNet8x4。无 GLVQ 分支的当前最佳结果同样有 11 组超过基线，其中五组通过降低融合强度至 `PROTO_FUSION_SCALE=0.25` 得到提升。
-
-本轮六组调参结果中，ResNet32x4 -> WRN16-2、VGG13 -> VGG8、VGG13 -> MobileNetV2、WRN40-2 -> MobileNetV2 和 WRN40-2 -> ResNet8x4 保留 `0.25`；ResNet50 -> MobileNetV2 的 `71.30%` 低于原无 GLVQ 结果 `71.39%`，因此回退到 `PROTO_FUSION_SCALE=0.5`。这说明融合强度对教师-学生架构具有依赖性，不能将 `0.25` 无条件推广到所有模型。
-
-该表中的无 GLVQ 结果用于独立评估 GLVQ 的贡献，不替换“含 GLVQ 主结果”的 CRLD-Proto 正式方法定义。原始逐轮记录仍保存在各输出目录的 `worklog.txt` 中。
-
-### 6.2 本轮无 GLVQ 调参输出目录
-
-```text
-无 GLVQ（E，PROTO_FUSION_SCALE=0.5）
-ResNet56 -> ResNet20: output/cifar100_baselines/crld_proto,res56,res20,e_no_glvq
-ResNet32x4 -> ResNet8x4: output/cifar100_baselines/crld_proto,res32x4,res8x4,ablation_e_no_glvq
-ResNet110 -> ResNet32: output/cifar100_baselines/crld_proto,res110,res32,ablation_e_no_glvq
-WRN40-2 -> WRN16-2: output/cifar100_baselines/crld_proto,wrn_40_2,wrn_16_2,ablation_e_no_glvq
-WRN40-2 -> WRN40-1: output/cifar100_baselines/crld_proto,wrn_40_2,wrn_40_1,ablation_e_no_glvq
-VGG13 -> VGG8: output/cifar100_baselines/crld_proto,vgg13,vgg8,ablation_e_no_glvq
-ResNet32x4 -> ShuffleNetV2: output/cifar100_baselines/crld_proto,res32x4,shuv2,ablation_e_no_glvq
-ResNet32x4 -> WRN16-2: output/cifar100_baselines/crld_proto,res32x4,wrn_16_2,ablation_e_no_glvq
-ResNet50 -> MobileNetV2: output/cifar100_baselines/crld_proto,res50,mv2,ablation_e_no_glvq
-VGG13 -> MobileNetV2: output/cifar100_baselines/crld_proto,vgg13,mv2,ablation_e_no_glvq
-WRN40-2 -> MobileNetV2: output/cifar100_baselines/crld_proto,wrn40_2,mv2,ablation_e_no_glvq
-WRN40-2 -> ResNet8x4: output/cifar100_baselines/crld_proto,wrn_40_2,res8x4,ablation_e_no_glvq
-
-无 GLVQ 调参（PROTO_FUSION_SCALE=0.25）
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,res32x4_wrn_16_2,f025,ablation_e_no_glvq
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,vgg13_vgg8,f025,ablation_e_no_glvq
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,vgg13_mv2,f025,ablation_e_no_glvq
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,wrn40_2_mv2,f025,ablation_e_no_glvq
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,wrn40_2_res8x4,f025,ablation_e_no_glvq
-output/_archive/cifar100_tuning/no_glvq/crld_proto,tune_noglvq,res50_mv2,f025,ablation_e_no_glvq
-```
-
-其中最后一项为已完成但未采用的候选结果，保留目录仅用于审计和复现；其余五组调参结果已采用，E 对照目录仍按各架构原有的 `ablation_e_no_glvq` 或 `e_no_glvq` 目录保存。
-
-<!-- CIFAR100_ABLATION_RESULTS_START -->
-## 7. CIFAR-100 消融实验
-
-> 此节由 `tools/run_cifar100_ablations.py` 根据独立 `worklog.txt` 自动同步。
-
-### 1.1 A-E 递进消融
+### 6.1 当前正式消融：A、B、D、E
 
 | 模式 | 关键设置 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
 | --- | --- | --- | ---: | ---: | ---: | --- |
-| A | 完整 CRLD，无原型 | ablation_a | 77.29% | 190 | 76.95% | 已完成 |
-| B | K-Means 原型 + 固定融合 | ablation_b | 77.72% | 224 | 77.63% | 已完成 |
-| C | B + GLVQ（历史审计） | ablation_c | 77.41% | 211 | 77.29% | 已完成 |
-| D | C + 不确定度权重（历史审计） | ablation_d | 77.58% | 216 | 77.33% | 已完成 |
-| E | 完整 CRLD-Proto | ablation_e | 77.04% | 228 | 76.89% | 已完成 |
+| A | 完整 CRLD，无原型修正 | `ablation_a` | **77.29%** | 190 | 76.95% | 已完成 |
+| B | 多中心原型 + 固定融合 | `ablation_b` | **77.72%** | 224 | 77.63% | 已完成 |
+| D | 多中心原型 + 不确定度门控 | `ablation_d_no_glvq` | **77.53%** | 215 | 77.25% | 已完成 |
+| E | 多中心原型 + 完整可靠性门控 | `ablation_e_no_glvq` | **77.44%** | 228 | 77.24% | 已完成 |
 
-### 1.2 门控因子消融
+`C` 没有单独的当前版本正式运行，因此不填入正式消融链。
 
-| 模式 | 删除的唯一因子 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
+### 6.2 历史 A-E 与单门控结果
+
+以下结果来自早期实现，仅用于审计已有输出，不作为当前方法的正式结论。
+
+| 实验 | Best Acc | Best Epoch | 最终 Acc | 输出目录 |
+| --- | ---: | ---: | ---: | --- |
+| A | 77.29% | 190 | 76.95% | `ablation_a` |
+| B | 77.72% | 224 | 77.63% | `ablation_b` |
+| C | 77.41% | 211 | 77.29% | `ablation_c` |
+| D | 77.58% | 216 | 77.33% | `ablation_d` |
+| E | 77.04% | 228 | 76.89% | `ablation_e` |
+| 去除不确定度门控 | 77.40% | 225 | 77.28% | `gate_no_uncertainty` |
+| 去除一致性门控 | 77.19% | 236 | 77.07% | `gate_no_agreement` |
+| 去除正向增益门控 | 77.31% | 236 | 77.00% | `gate_no_positive_gain` |
+| 去除原型置信度门控 | 77.22% | 200 | 77.00% | `gate_no_confidence` |
+
+### 6.3 教师筛选控制实验
+
+“仅教师预测正确”表示关闭置信度筛选、保留正确性条件；“无筛选”表示原型按真实类别接收全部训练样本。未完成的运行不填入结果。
+
+| 教师 -> 学生 | 仅教师预测正确 | 无筛选 | 备注 |
+| --- | ---: | ---: | --- |
+| ResNet56 -> ResNet20 | 72.29% | 72.42% | 已完成 |
+| ResNet110 -> ResNet32 | 75.05% | 75.12% | 已完成 |
+| ResNet32x4 -> ResNet8x4 | 未跑 | 77.46% | 无筛选已完成 |
+| ResNet32x4 -> ShuffleNetV2 | 78.88% | 未跑 | 仅正确已完成 |
+| ResNet32x4 -> WRN16-2 | 77.03% | 未跑 | 仅正确已完成 |
+| ResNet50 -> MobileNetV2 | 71.51% | 未跑 | 仅正确已完成 |
+| VGG13 -> MobileNetV2 | 69.47% | 未跑 | 仅正确已完成 |
+| VGG13 -> VGG8 | 未完成 | 未跑 | 仅运行至第 2 轮 |
+| WRN40-2 -> WRN16-2 | 未跑 | 运行中 | 第 37/240 轮，无 `best_acc` |
+
+## 7. MPKD 兼容性结果
+
+兼容性实验采用对应蒸馏方法加 MPKD，seed 42、240 epochs。下表记录所有已经完成的本地运行；DKD 的 `tune1/tune2` 是参数候选，`最佳` 取已完成候选中的最高值。
+
+### 7.1 DKD + MPKD
+
+| 教师 -> 学生 | 初始 | tune1 | tune2 | 当前最佳 |
+| --- | ---: | ---: | ---: | ---: |
+| ResNet56 -> ResNet20 | 71.04% | 71.81% | — | **71.81%** |
+| ResNet110 -> ResNet32 | 73.56% | 74.79% | — | **74.79%** |
+| ResNet32x4 -> ResNet8x4 | 77.31% | 77.43% | — | **77.43%** |
+| WRN40-2 -> WRN16-2 | 76.24% | 76.09% | 75.92% | **76.24%** |
+| WRN40-2 -> WRN40-1 | 75.75% | 75.76% | — | **75.76%** |
+| VGG13 -> VGG8 | 75.20% | 75.65% | 75.39% | **75.65%** |
+
+### 7.2 NKD + MPKD
+
+| 教师 -> 学生 | Best Acc | Best Epoch | 状态 |
+| --- | ---: | ---: | --- |
+| ResNet56 -> ResNet20 | **72.85%** | 232 | 已完成 |
+| ResNet110 -> ResNet32 | **74.66%** | 237 | 已完成 |
+| ResNet32x4 -> ResNet8x4 | **78.58%** | 225 | 已完成 |
+| WRN40-2 -> WRN16-2 | **77.10%** | 229 | 已完成 |
+| WRN40-2 -> WRN40-1 | **75.99%** | 228 | 已完成 |
+| VGG13 -> VGG8 | **75.66%** | 219 | 已完成 |
+
+KD、KD+CRLD、KD+MPKD、DKD、DKD+CRLD、NKD 和 NKD+CRLD 的完整统一对照实验目前没有本地完整 `worklog.txt`，仍标记为“未跑”，不使用文献数值代填。配置位于 `configs/cifar100/mpkd/`，运行器为 `tools/run_mpkd_compatibility.py`。
+
+## 8. 跨数据集结果
+
+| 数据集 | 教师 -> 学生 | 配置 | Best Top-1 | Best Top-5 | Best Epoch | 状态 |
 | --- | --- | --- | ---: | ---: | ---: | --- |
-| gate_no_uncertainty | 强视图不确定度 | gate_no_uncertainty | 77.40% | 225 | 77.28% | 已完成 |
-| gate_no_agreement | 类别一致性 | gate_no_agreement | 77.19% | 236 | 77.07% | 已完成 |
-| gate_no_positive_gain | 锚定类正向增益 | gate_no_positive_gain | 77.31% | 236 | 77.00% | 已完成 |
-| gate_no_confidence | 原型置信度 | gate_no_confidence | 77.22% | 200 | 77.00% | 已完成 |
+| Tiny-ImageNet-200 教师 | ResNet32x4 | `configs/tinyimagenet200/teacher/res32x4.yaml` | **65.31%** | 85.24% | 190 | 已完成 |
+| Tiny-ImageNet-200 | ResNet32x4 -> ResNet8x4 | `configs/tinyimagenet200/crld_proto/res32x4_res8x4.yaml` | **62.42%** | 83.80% | 228 | 已完成 |
+| ImageNet-1K | ResNet34 -> ResNet18 | `configs/imagenet/crld_proto/r34_r18.yaml` | — | — | — | 尚无本地完整结果 |
+| ImageNet-1K | ResNet50 -> MobileNetV1 | `configs/imagenet/crld_proto/r50_mv1.yaml` | — | — | — | 尚无本地完整结果 |
 
-### 1.3 无 GLVQ 对照
+Tiny-ImageNet 的同一 `worklog.txt` 中保留过两次完整运行，最终正式值取两次运行的最高 `best_acc`。ImageNet 配置已准备好，但当前 `output/` 下没有对应完整训练日志。
 
-以下记录只用于判断 GLVQ 的影响，不改变 CRLD-Proto 的方法定义。
+## 9. 原型筛选保留率审计
 
-| 模式 | 关键设置 | 输出目录后缀 | Best Acc | Best Epoch | 最终 Acc | 状态 |
-| --- | --- | --- | ---: | ---: | ---: | --- |
-| A | 完整 CRLD，无原型 | ablation_a（复用） | 77.29% | 190 | 76.95% | 已完成 |
-| B | K-Means 原型 + 固定融合 | ablation_b（复用） | 77.72% | 224 | 77.63% | 已完成 |
-| D_no_glvq | K-Means 原型 + 不确定度门控，无 GLVQ | ablation_d_no_glvq | 77.53% | 215 | 77.25% | 已完成 |
-| E_no_glvq | K-Means 原型 + 全部门控，无 GLVQ | ablation_e_no_glvq | 77.44% | 228 | 77.24% | 已完成 |
-<!-- CIFAR100_ABLATION_RESULTS_END -->
+以下为 `PROTO_TAU_W=0.80` 的训练集扫描结果。`教师准确率` 是教师在训练集上的准确率，`保留率` 是同时满足教师预测正确和置信度阈值的样本比例。
+
+| 教师 -> 学生 | 教师准确率 | 保留率 | 保留样本数 |
+| --- | ---: | ---: | ---: |
+| ResNet56 -> ResNet20 | 97.786% | 92.358% | 46179/50000 |
+| ResNet110 -> ResNet32 | 99.554% | 98.250% | 49125/50000 |
+| ResNet32x4 -> ResNet8x4 | 99.978% | 99.918% | 49959/50000 |
+| ResNet32x4 -> ShuffleNetV2 | 99.978% | 99.916% | 49958/50000 |
+| ResNet32x4 -> WRN16-2 | 99.974% | 99.920% | 49960/50000 |
+| ResNet50 -> MobileNetV2 | 99.966% | 99.930% | 49965/50000 |
+| VGG13 -> MobileNetV2 | 99.966% | 99.844% | 49922/50000 |
+| VGG13 -> VGG8 | 99.948% | 99.856% | 49928/50000 |
+| WRN40-2 -> MobileNetV2 | 99.884% | 99.286% | 49643/50000 |
+| WRN40-2 -> ResNet8x4 | 99.894% | 99.282% | 49641/50000 |
+| WRN40-2 -> WRN16-2 | 99.906% | 99.292% | 49646/50000 |
+| WRN40-2 -> WRN40-1 | 99.890% | 99.250% | 49625/50000 |
+
+该扫描说明多数架构的双重筛选保留率接近 100%，但 ResNet56 -> ResNet20 的保留率相对较低，因此筛选消融仍有必要单独报告。
+
+## 10. 当前运行状态
+
+| 实验 | 当前进度 | 结果状态 | 输出目录 |
+| --- | ---: | --- | --- |
+| 无筛选：WRN40-2 -> WRN16-2 | 37/240 epochs | 运行中，尚无 `best_acc` | `output/cifar100_baselines/crld_proto,wrn_40_2,wrn_16_2,no_filter` |
+
+## 11. 结果来源约定
+
+- **本地实验**：对应输出目录存在完整 `worklog.txt` 和 `best_acc`。
+- **文献/基线**：来自论文或项目提供的参考值，不等同于本地复现。
+- **历史探索**：曾经运行过但不属于当前正式结果的早期候选配置。
+- **未跑**：没有完整本地结果，不填写估计值。

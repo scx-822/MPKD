@@ -27,9 +27,6 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  # 当前正式最好 76.95% 对应 PROTO_TEMP=0.10。0.15 候选此前仅
-  # 运行 97 epoch，前期曲线与 0.10 基本持平，本轮从头完整复验；
-  # 未刷新 76.95% 时由批量脚本自动恢复 0.10。
   TEMPERATURE: 4.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 2.0
@@ -37,5 +34,7 @@ CRLD:
   TAU_W: 0.9
   TAU_S: 0.3
   PROTO_TEMP: 0.15
-  PROTO_TAU_W: 0.80
+  PROTO_TAU_W: 0.8
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.25
+  PROTO_AGGREGATION: "logmeanexp"

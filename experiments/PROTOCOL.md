@@ -1,6 +1,6 @@
 # 实验协议与文件说明
 
-本文件集中记录实验设置、运行入口、结果口径和资料目录。逐轮训练日志保存在 `log.md`，结构化结果保存在 `RESULTS.md`；二者不重复记录完整流程。
+本文件集中记录实验设置、运行入口、结果口径和资料目录。结果、状态和实验日志统一保存在 `log.md`。
 
 ## 1. 方法关系
 
@@ -11,7 +11,7 @@
 | MPKD | KD/DKD/NKD 的原型兼容适配器 | `tools/train_proto.py` + `MPKD` |
 | KD、DKD、NKD | 原始类别级蒸馏方法 | `tools/train.py` |
 
-CRLD-Proto 保留完整 CRLD 的监督、弱视图同视图和两项交叉视图约束，仅对教师强视图同视图目标执行原型修正。教师和原型在学生训练阶段冻结，原型不参与反向传播。当前正式原型构建为可靠弱视图特征筛选、类内 K-Means 多中心、L2 归一化和固定原型，不使用 GLVQ。
+CRLD-Proto 保留完整 CRLD 的监督、弱视图同视图和两项交叉视图约束，仅对教师强视图同视图目标执行原型修正。教师和原型在学生训练阶段冻结，原型不参与反向传播。当前正式原型构建为可靠弱视图特征筛选、类内 K-Means 多中心、L2 归一化和固定原型。
 
 ## 2. 固定设置
 
@@ -95,7 +95,7 @@ python tools/run_cifar100_ablations.py --phase gates --dry-run
 python tools/run_cifar100_ablations.py --phase gates
 ```
 
-运行器会读取独立 worklog，更新 `RESULTS.md` 的消融表，并同步 `log.md` 的自动汇总区。
+运行器会读取独立 worklog，直接更新 `log.md` 的消融表。
 
 ## 5. MPKD 兼容矩阵
 

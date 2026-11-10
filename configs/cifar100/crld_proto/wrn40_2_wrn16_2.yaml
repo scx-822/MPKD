@@ -27,16 +27,14 @@ SOLVER:
   TRAINER: "crld"
 
 CRLD:
-  # 当前正式最好 76.97%（seed=42）对应 PROTO_TEMP=0.50，
-  # 相比 0.35 提升 0.43 个百分点。
   TEMPERATURE: 3.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 1.0
-  # 交叉视图 KD 仍使用原始教师强视图目标，因此保持较低权重。
   CV_WEIGHT: 0.1
   TAU_W: 0.8
-  # 仅保留高置信教师强视图样本参与交叉视图 KD。
   TAU_S: 0.6
-  PROTO_TEMP: 0.50
-  PROTO_TAU_W: 0.80
+  PROTO_TEMP: 0.5
+  PROTO_TAU_W: 0.8
   PROTO_K: 3
+  PROTO_FUSION_SCALE: 0.25
+  PROTO_AGGREGATION: "logmeanexp"

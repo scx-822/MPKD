@@ -1,4 +1,4 @@
-"""Prepare and validate resources used by the CRLD-Proto experiments.
+"""Prepare and validate resources used by the MPKD experiments.
 
 The script is intentionally idempotent. It never treats a placeholder file or
 an incomplete download as a dataset/checkpoint. ImageNet itself is not
@@ -25,10 +25,10 @@ DATA_DIR = ROOT / "data"
 CKPT_DIR = ROOT / "download_ckpts"
 MANIFEST_PATH = ROOT / "experiments" / "resources_manifest.json"
 EXPERIMENT_IDENTITY = {
-    "method": "CRLD-Proto",
+    "method": "MPKD",
     "baseline": "CRLD",
     "relationship": (
-        "CRLD-Proto preserves the complete CRLD objective and adds "
+        "MPKD retains the CRLD two-view distillation objective and adds "
         "multi-center prototype correction to the teacher strong-view target."
     ),
 }
@@ -64,6 +64,16 @@ def report(message: str, ok: bool | None = None) -> None:
     else:
         prefix = "[INFO]"
     print(f"{prefix} {message}")
+
+
+def manifest_path(path: Path | None) -> str | None:
+    """Store repository resources as portable paths in the manifest."""
+    if path is None:
+        return None
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def sha256(path: Path) -> str:
@@ -251,7 +261,7 @@ def prepare_tiny(url: str, expected_size: int | None = None) -> dict:
     report(f"Tiny-ImageNet: {root}", ready)
     return {
         "status": "ready" if ready else "missing",
-        "path": str(root),
+        "path": manifest_path(root),
         "classes": 200 if ready else 0,
         "train_images": 100_000 if ready else 0,
         "val_images": 10_000 if ready else 0,
@@ -269,12 +279,15 @@ def check_cifar() -> dict:
     for name, relative_path in CIFAR_TEACHERS.items():
         path = teacher_root / relative_path
         ready = path.is_file() and path.stat().st_size > 1_000_000
-        teacher_status[name] = {"status": "ready" if ready else "missing", "path": str(path)}
+        teacher_status[name] = {
+            "status": "ready" if ready else "missing",
+            "path": manifest_path(path),
+        }
         report(f"CIFAR teacher {name}: {path}", ready)
     return {
         "status": "ready" if data_ready and all(item["status"] == "ready" for item in teacher_status.values()) else "missing",
-        "data_path": str(root),
-        "archive": str(archive) if archive.is_file() else None,
+        "data_path": manifest_path(root),
+        "archive": manifest_path(archive) if archive.is_file() else None,
         "teachers": teacher_status,
     }
 
@@ -291,9 +304,9 @@ def check_imagenet_data() -> dict:
     )
     return {
         "status": "ready" if ready else "external_required",
-        "path": str(root),
-        "train": str(root / "train"),
-        "val": str(root / "val"),
+        "path": manifest_path(root),
+        "train": manifest_path(root / "train"),
+        "val": manifest_path(root / "val"),
     }
 
 
@@ -305,7 +318,12 @@ def prepare_imagenet_teachers() -> dict:
         if not path.is_file() or path.stat().st_size < 10_000_000:
             download_resumable(url, path)
         digest = sha256(path)
-        result[name] = {"status": "ready", "path": str(path), "sha256": digest, "url": url}
+        result[name] = {
+            "status": "ready",
+            "path": manifest_path(path),
+            "sha256": digest,
+            "url": url,
+        }
         report(f"ImageNet teacher {name}: {path}", True)
     return result
 
@@ -320,7 +338,7 @@ def check_tiny_teacher() -> dict:
     )
     return {
         "status": "ready" if ready else "external_required",
-        "path": str(path),
+        "path": manifest_path(path),
         "source": "CRLD author-provided checkpoint or local teacher training",
     }
 
@@ -361,7 +379,7 @@ def main() -> int:
 
     resources = {
         "experiment": EXPERIMENT_IDENTITY,
-        "root": str(ROOT),
+        "root": ".",
         "cifar100": check_cifar(),
     }
     if args.prepare_public:
@@ -373,11 +391,14 @@ def main() -> int:
     else:
         resources["tinyimagenet200"] = {
             "status": "ready" if tiny_root_is_ready(DATA_DIR / "tiny-imagenet-200") else "missing",
-            "path": str(DATA_DIR / "tiny-imagenet-200"),
+            "path": manifest_path(DATA_DIR / "tiny-imagenet-200"),
         }
         resources["imagenet_teachers"] = {
             "status": "check-only",
-            "paths": [str(CKPT_DIR / "imagenet_teachers" / filename) for _, filename in IMAGE_NET_TEACHERS.values()],
+            "paths": [
+                manifest_path(CKPT_DIR / "imagenet_teachers" / filename)
+                for _, filename in IMAGE_NET_TEACHERS.values()
+            ],
         }
         report("Use --prepare-public to download public resources.")
     resources["imagenet"] = check_imagenet_data()

@@ -15,7 +15,7 @@
 
 ```powershell
 $env:CRLD_CUDNN_BENCHMARK="0"
-& "D:\softwares\python\python.exe" tools/train_proto.py --cfg configs/cifar100/mpkd/res56_res20.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,nkd,proto_tau06,res56_res20 EXPERIMENT.METHOD NKD-MPKD EXPERIMENT.BASELINE NKD MPKD.BASE_METHOD NKD
+& "D:\softwares\python\python.exe" tools/train_proto.py --cfg configs/cifar100/mpkd_compatibility/res56_res20.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,nkd,proto_tau06,res56_res20 EXPERIMENT.METHOD NKD-MPKD EXPERIMENT.BASELINE NKD MPKD.BASE_METHOD NKD
 ```
 
 已保留上述输出目录中的 `latest`、`best`、`student_latest`、`student_best` 和 `worklog.txt`；不要清理或改名，以便从当前进度续训。
@@ -37,7 +37,7 @@ $env:CRLD_CUDNN_BENCHMARK="0"
 
 ```powershell
 $env:CRLD_CUDNN_BENCHMARK="0"
-python tools/train_proto.py --cfg configs/cifar100/mpkd/wrn40_2_wrn16_2.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,nkd,nkd1,wrn40_2_wrn16_2 EXPERIMENT.METHOD NKD-MPKD EXPERIMENT.BASELINE NKD MPKD.BASE_METHOD NKD
+python tools/train_proto.py --cfg configs/cifar100/mpkd_compatibility/wrn40_2_wrn16_2.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,nkd,nkd1,wrn40_2_wrn16_2 EXPERIMENT.METHOD NKD-MPKD EXPERIMENT.BASELINE NKD MPKD.BASE_METHOD NKD
 ```
 
 该组完成后运行剩余两组：
@@ -68,7 +68,7 @@ ResNet110 -> ResNet32、ResNet32x4 -> ResNet8x4 和 WRN40-2 -> WRN16-2 已完成
 从 WRN40-2 -> WRN40-1 的 `latest` 继续：
 
 ```powershell
-python tools/train_proto.py --cfg configs/cifar100/mpkd/wrn40_2_wrn40_1.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,dkd,wrn40_2_wrn40_1 EXPERIMENT.METHOD DKD-MPKD EXPERIMENT.BASELINE DKD MPKD.BASE_METHOD DKD
+python tools/train_proto.py --cfg configs/cifar100/mpkd_compatibility/wrn40_2_wrn40_1.yaml --resume --seed 42 EXPERIMENT.TAG mpkd,dkd,wrn40_2_wrn40_1 EXPERIMENT.METHOD DKD-MPKD EXPERIMENT.BASELINE DKD MPKD.BASE_METHOD DKD
 ```
 
 不要删除或改名 `output/cifar100_compatibility/mpkd,dkd,wrn40_2_wrn40_1/`，否则 `--resume` 无法读取当前检查点。
@@ -93,7 +93,7 @@ python tools/run_mpkd_compatibility.py --architectures vgg13_vgg8 --methods DKD 
 
 ```powershell
 $env:CRLD_CUDNN_BENCHMARK="0"
-& "D:\softwares\python\python.exe" tools/train_proto.py --cfg configs/cifar100/crld_proto/res56_res20.yaml --resume --seed 42 EXPERIMENT.TAG crld_proto,res56,res20,anchor_ground_truth CRLD.PROTO_ANCHOR ground_truth
+& "D:\softwares\python\python.exe" tools/train_proto.py --cfg configs/cifar100/mpkd/res56_res20.yaml --resume --seed 42 EXPERIMENT.TAG crld_proto,res56,res20,anchor_ground_truth MPKD.PROTO_ANCHOR ground_truth
 ```
 
 已保留该目录中的 `latest`、`best`、`student_latest`、`student_best` 和 `worklog.txt`，

@@ -48,10 +48,17 @@ cudnn.deterministic = _cudnn_bool("CRLD_CUDNN_DETERMINISTIC")
 
 
 DEFAULT_TRAINING_SEED = 42
-METHOD_DISPLAY_NAME = "CRLD-Proto"
+METHOD_DISPLAY_NAME = "MPKD"
 BASELINE_DISPLAY_NAME = "CRLD"
-PROTO_DISTILLER_TYPES = {"CRLD_Proto", "MPKD"}
+PROTO_DISTILLER_TYPES = {"MPKD_CRLD", "CRLD_Proto", "MPKD"}
 PROTO_AGGREGATIONS = {"logmeanexp", "mean", "max"}
+
+
+def _prototype_cfg(config):
+    """Resolve the primary MPKD settings or the legacy CRLD-Proto alias."""
+    if config.DISTILLER.TYPE == "CRLD_Proto":
+        return config.CRLD
+    return config.MPKD
 
 
 def aggregate_prototype_logits(scaled_similarity, aggregation="logmeanexp"):
@@ -74,7 +81,7 @@ def aggregate_prototype_logits(scaled_similarity, aggregation="logmeanexp"):
 ABLATION_MODE_SPECS = {
     "A": {
         "tag": "ablation_a",
-        "description": "Complete CRLD without prototype correction.",
+        "description": "CRLD baseline without prototype correction.",
         "PROTO_ENABLED": False,
         "PROTO_FUSION_MODE": "fixed",
         "PROTO_GATE_UNCERTAINTY": False,
@@ -85,8 +92,8 @@ ABLATION_MODE_SPECS = {
     "B": {
         "tag": "ablation_b",
         "description": (
-            "CRLD plus K-Means multi-center prototypes, Log-Mean-Exp, and "
-            "unconditional fixed-weight fusion."
+            "MPKD with multi-center prototypes and fixed-weight fusion, "
+            "without reliability gating."
         ),
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "fixed",
@@ -97,7 +104,7 @@ ABLATION_MODE_SPECS = {
     },
     "C": {
         "tag": "ablation_c",
-        "description": "B plus teacher strong-view uncertainty gating.",
+        "description": "MPKD with strong-view uncertainty gating.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -107,7 +114,7 @@ ABLATION_MODE_SPECS = {
     },
     "D": {
         "tag": "ablation_d",
-        "description": "C plus class-agreement and positive-gain gating.",
+        "description": "MPKD with uncertainty, agreement, and positive-gain gates.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -117,7 +124,7 @@ ABLATION_MODE_SPECS = {
     },
     "E": {
         "tag": "ablation_e",
-        "description": "Complete CRLD-Proto with all reliability gates.",
+        "description": "Complete MPKD with all reliability gates.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -127,7 +134,7 @@ ABLATION_MODE_SPECS = {
     },
     "gate_no_uncertainty": {
         "tag": "gate_no_uncertainty",
-        "description": "Complete CRLD-Proto without uncertainty gating.",
+        "description": "MPKD without uncertainty gating.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": False,
@@ -137,7 +144,7 @@ ABLATION_MODE_SPECS = {
     },
     "gate_no_agreement": {
         "tag": "gate_no_agreement",
-        "description": "Complete CRLD-Proto without class-agreement gating.",
+        "description": "MPKD without class-agreement gating.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -147,7 +154,7 @@ ABLATION_MODE_SPECS = {
     },
     "gate_no_positive_gain": {
         "tag": "gate_no_positive_gain",
-        "description": "Complete CRLD-Proto without positive-gain gating.",
+        "description": "MPKD without positive-gain gating.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -157,7 +164,7 @@ ABLATION_MODE_SPECS = {
     },
     "gate_no_confidence": {
         "tag": "gate_no_confidence",
-        "description": "Complete CRLD-Proto without prototype-confidence gating.",
+        "description": "MPKD without prototype-confidence gating.",
         "PROTO_ENABLED": True,
         "PROTO_FUSION_MODE": "gated",
         "PROTO_GATE_UNCERTAINTY": True,
@@ -176,7 +183,7 @@ def apply_ablation_mode(config, mode):
     spec = ABLATION_MODE_SPECS[mode]
     for key, value in spec.items():
         if key not in {"tag", "description"}:
-            setattr(config.CRLD, key, value)
+            setattr(_prototype_cfg(config), key, value)
 
     experiment_field = "NAME" if config.EXPERIMENT.NAME else "TAG"
     base_name = getattr(config.EXPERIMENT, experiment_field)
@@ -192,8 +199,8 @@ def validate_ablation_context(config, mode):
 
     expected = {
         "DATASET.TYPE": (config.DATASET.TYPE, "cifar100"),
-        "DISTILLER.TYPE": (config.DISTILLER.TYPE, "CRLD_Proto"),
-        "CRLD.PROTO_K": (int(config.CRLD.PROTO_K), 3),
+        "DISTILLER.TYPE": (config.DISTILLER.TYPE, "MPKD_CRLD"),
+        "MPKD.PROTO_K": (int(config.MPKD.PROTO_K), 3),
     }
     mismatches = [
         f"{name}={actual!r} (expected {required!r})"
@@ -202,7 +209,7 @@ def validate_ablation_context(config, mode):
     ]
     if mismatches:
         raise ValueError(
-            "CIFAR-100 CRLD-Proto ablations require CRLD_Proto and K=3. "
+            "CIFAR-100 MPKD ablations require MPKD_CRLD and K=3. "
             "Invalid setting(s): " + "; ".join(mismatches)
         )
 
@@ -903,7 +910,7 @@ def write_proto_scan_summary(markdown_path, rows, settings, selected):
         )
         file.write(
             "> 这是原型空间的快速代理筛选，不等价于完整 240 epoch 学生训练的最终准确率。"
-            "最终配置仍需通过完整 CRLD-Proto 训练确认。\n"
+            "最终配置仍需通过完整 MPKD 训练确认。\n"
         )
 
 
@@ -1044,7 +1051,7 @@ def run_proto_parameter_scan(teacher, train_loader, num_classes, feature_dim, K,
 
 
 # ==============================================================================
-# 6. Complete CRLD-Proto: reliability-gated prototype probability fusion
+# 6. MPKD: reliability-gated prototype probability fusion
 # ==============================================================================
 def positive_gain_proto_fusion(
     prob_t_s,
@@ -1106,68 +1113,75 @@ def positive_gain_proto_fusion(
     return fused
 
 
-class CRLD_Proto(Distiller):
-    """Complete CRLD with prototype-corrected teacher strong-view targets."""
+class MPKD_CRLD(Distiller):
+    """MPKD using the established CRLD two-view distillation objective."""
 
     def __init__(self, student, teacher, cfg, precomputed_prototypes=None):
-        super(CRLD_Proto, self).__init__(student, teacher)
+        super(MPKD_CRLD, self).__init__(student, teacher)
+        method_cfg = _prototype_cfg(cfg)
 
         # Keep the original CRLD values as defaults, while allowing controlled
         # command-line overrides for architecture-specific ablations.
-        self.temperature = float(getattr(cfg.CRLD, 'TEMPERATURE', 4.0))
-        self.ce_loss_weight = float(getattr(cfg.CRLD, 'CE_WEIGHT', 1.0))
-        self.wv_loss_weight = float(getattr(cfg.CRLD, 'WV_WEIGHT', 2.0))
-        self.cv_loss_weight = float(getattr(cfg.CRLD, 'CV_WEIGHT', 0.5))
+        configured_temperature = getattr(method_cfg, 'TEMPERATURE', None)
+        configured_ce_weight = getattr(method_cfg, 'CE_WEIGHT', None)
+        self.temperature = float(
+            4.0 if configured_temperature is None else configured_temperature
+        )
+        self.ce_loss_weight = float(
+            1.0 if configured_ce_weight is None else configured_ce_weight
+        )
+        self.wv_loss_weight = float(getattr(method_cfg, 'WV_WEIGHT', 2.0))
+        self.cv_loss_weight = float(getattr(method_cfg, 'CV_WEIGHT', 0.5))
         # Keep the default unchanged, but allow controlled architecture-specific
         # ablations to reduce the influence of K-Means-only prototypes.
         self.proto_fusion_scale = float(
-            getattr(cfg.CRLD, 'PROTO_FUSION_SCALE', 0.5)
+            getattr(method_cfg, 'PROTO_FUSION_SCALE', 0.5)
         )
         if not 0.0 < self.proto_fusion_scale <= 1.0:
             raise ValueError("PROTO_FUSION_SCALE must be in (0, 1].")
-        self.tau_w = float(getattr(cfg.CRLD, 'TAU_W', 0.9))
-        self.tau_s = float(getattr(cfg.CRLD, 'TAU_S', 0.2))
+        self.tau_w = float(getattr(method_cfg, 'TAU_W', 0.9))
+        self.tau_s = float(getattr(method_cfg, 'TAU_S', 0.2))
 
         if self.temperature <= 0.0:
             raise ValueError("CRLD temperature must be positive.")
         if min(self.ce_loss_weight, self.wv_loss_weight, self.cv_loss_weight) < 0.0:
             raise ValueError("CRLD loss weights must be non-negative.")
 
-        self.proto_temp = float(getattr(cfg.CRLD, 'PROTO_TEMP', 0.5))
+        self.proto_temp = float(getattr(method_cfg, 'PROTO_TEMP', 0.5))
         if self.proto_temp <= 0.0:
             raise ValueError("PROTO_TEMP must be positive.")
         self.proto_aggregation = str(
-            getattr(cfg.CRLD, 'PROTO_AGGREGATION', 'logmeanexp')
+            getattr(method_cfg, 'PROTO_AGGREGATION', 'logmeanexp')
         ).lower().replace('-', '')
         if self.proto_aggregation not in PROTO_AGGREGATIONS:
             raise ValueError(
-                "CRLD.PROTO_AGGREGATION must be one of "
+                "MPKD.PROTO_AGGREGATION must be one of "
                 f"{sorted(PROTO_AGGREGATIONS)}."
             )
         self.proto_anchor = str(
-            getattr(cfg.CRLD, 'PROTO_ANCHOR', 'weak_teacher')
+            getattr(method_cfg, 'PROTO_ANCHOR', 'weak_teacher')
         ).lower().replace('-', '_')
         if self.proto_anchor not in {'weak_teacher', 'ground_truth'}:
             raise ValueError(
-                "CRLD.PROTO_ANCHOR must be either 'weak_teacher' or "
+                "MPKD.PROTO_ANCHOR must be either 'weak_teacher' or "
                 "'ground_truth'."
             )
 
-        self.proto_enabled = bool(getattr(cfg.CRLD, 'PROTO_ENABLED', True))
+        self.proto_enabled = bool(getattr(method_cfg, 'PROTO_ENABLED', True))
         self.proto_fusion_mode = str(
-            getattr(cfg.CRLD, 'PROTO_FUSION_MODE', 'gated')
+            getattr(method_cfg, 'PROTO_FUSION_MODE', 'gated')
         ).lower()
         self.proto_gate_uncertainty = bool(
-            getattr(cfg.CRLD, 'PROTO_GATE_UNCERTAINTY', True)
+            getattr(method_cfg, 'PROTO_GATE_UNCERTAINTY', True)
         )
         self.proto_gate_agreement = bool(
-            getattr(cfg.CRLD, 'PROTO_GATE_AGREEMENT', True)
+            getattr(method_cfg, 'PROTO_GATE_AGREEMENT', True)
         )
         self.proto_gate_positive_gain = bool(
-            getattr(cfg.CRLD, 'PROTO_GATE_POSITIVE_GAIN', True)
+            getattr(method_cfg, 'PROTO_GATE_POSITIVE_GAIN', True)
         )
         self.proto_gate_confidence = bool(
-            getattr(cfg.CRLD, 'PROTO_GATE_CONFIDENCE', True)
+            getattr(method_cfg, 'PROTO_GATE_CONFIDENCE', True)
         )
         if self.proto_fusion_mode not in {'fixed', 'gated'}:
             raise ValueError(
@@ -1301,7 +1315,10 @@ class CRLD_Proto(Distiller):
                 return logits[0] if isinstance(logits, (list, tuple)) else logits
         raise ValueError("Missing required inputs.")
 
-distiller_dict["CRLD_Proto"] = CRLD_Proto
+distiller_dict["MPKD_CRLD"] = MPKD_CRLD
+# Preserve the old type string for checkpoints/configurations made before the
+# method was renamed; new experiments must use MPKD_CRLD and MPKD settings.
+distiller_dict["CRLD_Proto"] = MPKD_CRLD
 
 
 # ==============================================================================
@@ -1325,12 +1342,12 @@ def _project_root():
 
 def get_proto_method_cfg(config):
     """Return the method-specific prototype configuration node."""
-    if config.DISTILLER.TYPE == "MPKD":
+    if config.DISTILLER.TYPE in {"MPKD_CRLD", "MPKD"}:
         return config.MPKD
     if config.DISTILLER.TYPE == "CRLD_Proto":
         return config.CRLD
     raise ValueError(
-        "tools/train_proto.py supports CRLD_Proto and MPKD; "
+        "tools/train_proto.py supports MPKD_CRLD and MPKD; "
         "use tools/train.py for the original single-view KD/DKD/NKD runs."
     )
 
@@ -1356,8 +1373,9 @@ def append_method_metadata(
         )
     else:
         relationship = (
-            "CRLD-Proto preserves complete CRLD and changes only the teacher "
-            "strong-view same-view target through gated prototype correction."
+            "MPKD retains the CRLD two-view distillation objective and changes "
+            "only the teacher strong-view same-view target through gated "
+            "prototype correction."
         )
     if not proto_enabled:
         relationship = (
@@ -1367,9 +1385,9 @@ def append_method_metadata(
     if ablation_mode is not None:
         ablation_description = ABLATION_MODE_SPECS[ablation_mode]["description"]
     elif cfg.DISTILLER.TYPE == "MPKD":
-        ablation_description = "Formal MPKD compatibility run."
+        ablation_description = "Formal KD/DKD/NKD + MPKD compatibility run."
     else:
-        ablation_description = "Formal complete CRLD-Proto run."
+        ablation_description = "Formal MPKD run."
     with open(worklog_path, "a", encoding="utf-8") as writer:
         writer.writelines([
             "\n" + "=" * 48 + "\n",
@@ -1388,7 +1406,7 @@ def append_method_metadata(
             f"agreement={bool(getattr(method_cfg, 'PROTO_GATE_AGREEMENT', True))}, "
             f"positive_gain={bool(getattr(method_cfg, 'PROTO_GATE_POSITIVE_GAIN', True))}, "
             f"confidence={bool(getattr(method_cfg, 'PROTO_GATE_CONFIDENCE', True))}\n",
-            f"base_method: {getattr(method_cfg, 'BASE_METHOD', 'CRLD')}\n",
+            f"base_method: {getattr(method_cfg, 'BASE_METHOD', 'KD') if cfg.DISTILLER.TYPE == 'MPKD' else 'CRLD'}\n",
             f"seed: {training_seed}\n",
             f"started_at: {datetime.now().isoformat(timespec='seconds')}\n",
             "=" * 48 + "\n",
@@ -1495,15 +1513,13 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
     if cfg.DISTILLER.TYPE not in PROTO_DISTILLER_TYPES:
         raise ValueError(
             f"Unsupported distiller type {cfg.DISTILLER.TYPE!r} for "
-            "tools/train_proto.py. Use CRLD_Proto or MPKD here; use "
+            "tools/train_proto.py. Use MPKD_CRLD or MPKD here; use "
             "tools/train.py for the original KD/DKD/NKD implementations."
         )
     set_training_seed(training_seed)
     experiment_name = cfg.EXPERIMENT.NAME or cfg.EXPERIMENT.TAG
     experiment_name = os.path.join(cfg.EXPERIMENT.PROJECT, experiment_name)
-    method_name = cfg.EXPERIMENT.METHOD or (
-        "MPKD" if cfg.DISTILLER.TYPE == "MPKD" else METHOD_DISPLAY_NAME
-    )
+    method_name = cfg.EXPERIMENT.METHOD or METHOD_DISPLAY_NAME
     baseline_name = cfg.EXPERIMENT.BASELINE or (
         getattr(cfg.MPKD, "BASE_METHOD", "KD")
         if cfg.DISTILLER.TYPE == "MPKD"
@@ -1530,8 +1546,9 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
         )
     else:
         method_description = (
-            "CRLD-Proto preserves complete CRLD and changes only the teacher "
-            "strong-view same-view target through gated prototype correction."
+            "MPKD retains the CRLD two-view distillation objective and changes "
+            "only the teacher strong-view same-view target through gated "
+            "prototype correction."
         )
     print(log_msg(
         f"Method: {method_name}; baseline: {baseline_name}. " + method_description,
@@ -1668,7 +1685,8 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
             )
         else:
             prototype_message = (
-                "Complete CRLD structure retained; prototype correction changes "
+                "CRLD two-view distillation objective retained; prototype "
+                "correction changes "
                 "only the teacher strong-view same-view target."
             )
         print(log_msg(
@@ -1682,7 +1700,7 @@ def main(cfg, resume, proto_scan=False, proto_scan_temps=None,
     else:
         print(log_msg(
             "Ablation A: prototype construction and correction are disabled; "
-            "all complete CRLD losses remain unchanged.",
+            "all original CRLD baseline losses remain unchanged.",
             "INFO",
         ))
     distiller = distiller_dict[cfg.DISTILLER.TYPE](
@@ -1726,7 +1744,7 @@ if __name__ == "__main__":
     import multiprocessing
 
     multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser("CRLD-Proto/MPKD training")
+    parser = argparse.ArgumentParser("MPKD training")
     parser.add_argument("--cfg", type=str, default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_TRAINING_SEED)

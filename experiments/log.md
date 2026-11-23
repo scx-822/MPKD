@@ -1,4 +1,4 @@
-# CRLD-Proto 实验日志
+# MPKD 实验日志
 
 > 更新时间：2026-10-17
 > 记录范围：CIFAR-100 正式结果、消融与筛选审计、MPKD 兼容性结果，以及 Tiny-ImageNet 结果。
@@ -6,7 +6,7 @@
 
 ## 1. 实验目标
 
-CRLD-Proto 在完整 CRLD 双视图蒸馏目标上，对教师强干扰视图的同视图蒸馏目标进行多中心原型重构。其余监督损失、弱干扰同视图蒸馏和两项交叉视图蒸馏保持不变。
+MPKD 沿用 CRLD 双视图蒸馏目标，对教师强干扰视图的同视图蒸馏目标进行多中心原型重构。其余监督损失、弱干扰同视图蒸馏和两项交叉视图蒸馏保持不变。
 
 离线阶段从冻结教师的弱干扰视图特征中筛选可靠样本，按类别执行球面 K-Means，得到每类 `K=3` 个固定子原型。在线阶段使用教师强干扰视图特征计算原型类别分布，再通过可靠性门控得到样本级融合权重，仅重构强干扰同视图目标。教师和原型均不参与学生训练阶段的反向传播。
 
@@ -27,18 +27,18 @@ CRLD-Proto 在完整 CRLD 双视图蒸馏目标上，对教师强干扰视图的
 
 | 教师 -> 学生 | CRLD 基线 | CRLD 参数 | 门控 | 原型 | 融合比例 | Best Acc | Δ | 配置 |
 | --- | ---: | --- | --- | --- | ---: | ---: | ---: | --- |
-| ResNet56 -> ResNet20 | 72.10% | `3/1/1/0.25` | `0.8/0.4` | `0.75/0.35/3` | 0.50 | **72.63%** | +0.53 | [`res56_res20.yaml`](../configs/cifar100/crld_proto/res56_res20.yaml) |
-| ResNet110 -> ResNet32 | 74.42% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **75.21%** | +0.79 | [`res110_res32.yaml`](../configs/cifar100/crld_proto/res110_res32.yaml) |
-| ResNet32x4 -> ResNet8x4 | 77.60% | `4/1/2/0.5` | `0.9/0.2` | `0.80/0.15/3` | 0.50 | **77.44%** | -0.16 | [`res32x4_res8x4.yaml`](../configs/cifar100/crld_proto/res32x4_res8x4.yaml) |
-| WRN40-2 -> WRN16-2 | 76.45% | `3/1/1/0.1` | `0.8/0.6` | `0.80/0.50/3` | 0.25 | **77.36%** | +0.91 | [`wrn40_2_wrn16_2.yaml`](../configs/cifar100/crld_proto/wrn40_2_wrn16_2.yaml) |
-| WRN40-2 -> WRN40-1 | 75.58% | `4/1/1/0.1` | `0.8/0.6` | `0.85/0.02/3` | 0.50 | **76.05%** | +0.47 | [`wrn40_2_wrn40_1.yaml`](../configs/cifar100/crld_proto/wrn40_2_wrn40_1.yaml) |
-| VGG13 -> VGG8 | 75.27% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **75.59%** | +0.32 | [`vgg13_vgg8.yaml`](../configs/cifar100/crld_proto/vgg13_vgg8.yaml) |
-| ResNet32x4 -> ShuffleNetV2 | 78.27% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.10/3` | 0.50 | **79.38%** | +1.11 | [`res32x4_shuv2.yaml`](../configs/cifar100/crld_proto/res32x4_shuv2.yaml) |
-| ResNet32x4 -> WRN16-2 | 76.92% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.15/3` | 0.25 | **77.36%** | +0.44 | [`res32x4_wrn_16_2.yaml`](../configs/cifar100/crld_proto/res32x4_wrn_16_2.yaml) |
-| ResNet50 -> MobileNetV2 | 71.36% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **71.39%** | +0.03 | [`res50_mv2.yaml`](../configs/cifar100/crld_proto/res50_mv2.yaml) |
-| VGG13 -> MobileNetV2 | 70.39% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **71.67%** | +1.28 | [`vgg13_mv2.yaml`](../configs/cifar100/crld_proto/vgg13_mv2.yaml) |
-| WRN40-2 -> MobileNetV2 | 70.37% | `3/1/1/0.1` | `0.8/0.65` | `0.80/0.35/3` | 0.25 | **71.24%** | +0.87 | [`wrn40_2_mv2.yaml`](../configs/cifar100/crld_proto/wrn40_2_mv2.yaml) |
-| WRN40-2 -> ResNet8x4 | 77.28% | `4/1/1/0.1` | `0.8/0.65` | `0.80/0.80/3` | 0.25 | **77.54%** | +0.26 | [`wrn40_2_res8x4.yaml`](../configs/cifar100/crld_proto/wrn40_2_res8x4.yaml) |
+| ResNet56 -> ResNet20 | 72.10% | `3/1/1/0.25` | `0.8/0.4` | `0.75/0.35/3` | 0.50 | **72.63%** | +0.53 | [`res56_res20.yaml`](../configs/cifar100/mpkd/res56_res20.yaml) |
+| ResNet110 -> ResNet32 | 74.42% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **75.21%** | +0.79 | [`res110_res32.yaml`](../configs/cifar100/mpkd/res110_res32.yaml) |
+| ResNet32x4 -> ResNet8x4 | 77.60% | `4/1/2/0.5` | `0.9/0.2` | `0.80/0.15/3` | 0.50 | **77.44%** | -0.16 | [`res32x4_res8x4.yaml`](../configs/cifar100/mpkd/res32x4_res8x4.yaml) |
+| WRN40-2 -> WRN16-2 | 76.45% | `3/1/1/0.1` | `0.8/0.6` | `0.80/0.50/3` | 0.25 | **77.36%** | +0.91 | [`wrn40_2_wrn16_2.yaml`](../configs/cifar100/mpkd/wrn40_2_wrn16_2.yaml) |
+| WRN40-2 -> WRN40-1 | 75.58% | `4/1/1/0.1` | `0.8/0.6` | `0.85/0.02/3` | 0.50 | **76.05%** | +0.47 | [`wrn40_2_wrn40_1.yaml`](../configs/cifar100/mpkd/wrn40_2_wrn40_1.yaml) |
+| VGG13 -> VGG8 | 75.27% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **75.59%** | +0.32 | [`vgg13_vgg8.yaml`](../configs/cifar100/mpkd/vgg13_vgg8.yaml) |
+| ResNet32x4 -> ShuffleNetV2 | 78.27% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.10/3` | 0.50 | **79.38%** | +1.11 | [`res32x4_shuv2.yaml`](../configs/cifar100/mpkd/res32x4_shuv2.yaml) |
+| ResNet32x4 -> WRN16-2 | 76.92% | `4/1/2/0.5` | `0.9/0.3` | `0.80/0.15/3` | 0.25 | **77.36%** | +0.44 | [`res32x4_wrn_16_2.yaml`](../configs/cifar100/mpkd/res32x4_wrn_16_2.yaml) |
+| ResNet50 -> MobileNetV2 | 71.36% | `3/1/1/0.25` | `0.8/0.5` | `0.75/0.50/3` | 0.50 | **71.39%** | +0.03 | [`res50_mv2.yaml`](../configs/cifar100/mpkd/res50_mv2.yaml) |
+| VGG13 -> MobileNetV2 | 70.39% | `4/1/2/0.5` | `0.8/0.2` | `0.80/0.20/3` | 0.25 | **71.67%** | +1.28 | [`vgg13_mv2.yaml`](../configs/cifar100/mpkd/vgg13_mv2.yaml) |
+| WRN40-2 -> MobileNetV2 | 70.37% | `3/1/1/0.1` | `0.8/0.65` | `0.80/0.35/3` | 0.25 | **71.24%** | +0.87 | [`wrn40_2_mv2.yaml`](../configs/cifar100/mpkd/wrn40_2_mv2.yaml) |
+| WRN40-2 -> ResNet8x4 | 77.28% | `4/1/1/0.1` | `0.8/0.65` | `0.80/0.80/3` | 0.25 | **77.54%** | +0.26 | [`wrn40_2_res8x4.yaml`](../configs/cifar100/mpkd/wrn40_2_res8x4.yaml) |
 
 ## 4. 结果记录规则
 
@@ -52,7 +52,7 @@ CRLD-Proto 在完整 CRLD 双视图蒸馏目标上，对教师强干扰视图的
 单模型：
 
 ```powershell
-python tools/train_proto.py --cfg configs/cifar100/crld_proto/res110_res32.yaml --seed 42
+python tools/train_proto.py --cfg configs/cifar100/mpkd/res110_res32.yaml --seed 42
 ```
 
 批量运行：
@@ -134,16 +134,16 @@ python tools/run_cifar100_architectures.py
 | WRN40-2 -> WRN40-1 | **75.99%** | 228 | 已完成 |
 | VGG13 -> VGG8 | **75.66%** | 219 | 已完成 |
 
-KD、KD+CRLD、KD+MPKD、DKD、DKD+CRLD、NKD 和 NKD+CRLD 的完整统一对照实验目前没有本地完整 `worklog.txt`，仍标记为“未跑”，不使用文献数值代填。配置位于 `configs/cifar100/mpkd/`，运行器为 `tools/run_mpkd_compatibility.py`。
+KD、KD+CRLD、KD+MPKD、DKD、DKD+CRLD、NKD 和 NKD+CRLD 的完整统一对照实验目前没有本地完整 `worklog.txt`，仍标记为“未跑”，不使用文献数值代填。KD/DKD/NKD + MPKD 配置位于 `configs/cifar100/mpkd_compatibility/`，运行器为 `tools/run_mpkd_compatibility.py`。
 
 ## 8. 跨数据集结果
 
 | 数据集 | 教师 -> 学生 | 配置 | Best Top-1 | Best Top-5 | Best Epoch | 状态 |
 | --- | --- | --- | ---: | ---: | ---: | --- |
 | Tiny-ImageNet-200 教师 | ResNet32x4 | `configs/tinyimagenet200/teacher/res32x4.yaml` | **65.31%** | 85.24% | 190 | 已完成 |
-| Tiny-ImageNet-200 | ResNet32x4 -> ResNet8x4 | `configs/tinyimagenet200/crld_proto/res32x4_res8x4.yaml` | **62.42%** | 83.80% | 228 | 已完成 |
-| ImageNet-1K | ResNet34 -> ResNet18 | `configs/imagenet/crld_proto/r34_r18.yaml` | — | — | — | 尚无本地完整结果 |
-| ImageNet-1K | ResNet50 -> MobileNetV1 | `configs/imagenet/crld_proto/r50_mv1.yaml` | — | — | — | 尚无本地完整结果 |
+| Tiny-ImageNet-200 | ResNet32x4 -> ResNet8x4 | `configs/tinyimagenet200/mpkd/res32x4_res8x4.yaml` | **62.42%** | 83.80% | 228 | 已完成 |
+| ImageNet-1K | ResNet34 -> ResNet18 | `configs/imagenet/mpkd/r34_r18.yaml` | — | — | — | 尚无本地完整结果 |
+| ImageNet-1K | ResNet50 -> MobileNetV1 | `configs/imagenet/mpkd/r50_mv1.yaml` | — | — | — | 尚无本地完整结果 |
 
 Tiny-ImageNet 的同一 `worklog.txt` 中保留过两次完整运行，最终正式值取两次运行的最高 `best_acc`。ImageNet 配置已准备好，但当前 `output/` 下没有对应完整训练日志。
 

@@ -1,4 +1,4 @@
-"""Run the controlled CIFAR-100 CRLD-Proto ablations sequentially."""
+"""Run the controlled CIFAR-100 MPKD ablations sequentially."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOG_PATH = ROOT / "experiments" / "log.md"
 LOG_START = "<!-- CIFAR100_ABLATION_RESULTS_START -->"
 LOG_END = "<!-- CIFAR100_ABLATION_RESULTS_END -->"
-DEFAULT_CONFIG = Path("configs/cifar100/crld_proto/res32x4_res8x4.yaml")
+DEFAULT_CONFIG = Path("configs/cifar100/mpkd/res32x4_res8x4.yaml")
 MODE_GROUPS = {
     "ae": ["A", "B", "C", "D", "E"],
     "gates": [

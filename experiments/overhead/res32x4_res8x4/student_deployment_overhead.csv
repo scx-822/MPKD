@@ -1,3 +1,3 @@
 method,checkpoint,parameters_m,macs_g_per_image,flops_g_per_image,batch_size,latency_ms_per_batch,latency_ms_per_image,peak_inference_memory_mb
-CRLD student,"D:\Experients\CRLD-main\output\cifar100_baselines\crld_proto,res32x4,res8x4,ablation_a\student_best",1.23354,0.178578688,0.357157376,128,12.1808056640625,0.09516254425048828,201.6005859375
-MPKD student,"D:\Experients\CRLD-main\output\cifar100_baselines\crld_proto,res32x4,res8x4,correct_only\student_best",1.23354,0.178578688,0.357157376,128,11.67970703125,0.09124771118164063,201.6005859375
+CRLD student,"output/cifar100_baselines/crld_proto,res32x4,res8x4,ablation_a/student_best",1.23354,0.178578688,0.357157376,128,12.1808056640625,0.09516254425048828,201.6005859375
+MPKD student,"output/cifar100_baselines/crld_proto,res32x4,res8x4,correct_only/student_best",1.23354,0.178578688,0.357157376,128,11.67970703125,0.09124771118164063,201.6005859375

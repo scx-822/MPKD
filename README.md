@@ -1,12 +1,12 @@
-# CRLD-Proto / MPKD
+# MPKD
 
 本项目基于 `mdistiller`，实现并复现知识蒸馏、跨视图蒸馏以及多中心原型目标修正实验。
 
 ## 项目简介
 
 - `CRLD`：原始论文中的 Cross-View Consistency Regularisation 基线。
-- `CRLD-Proto`：在完整 CRLD 损失上增加多中心原型修正，只替换教师强视图同视图蒸馏目标。
-- `MPKD`：将同一原型修正模块适配到 `KD`、`DKD` 和 `NKD` 的兼容入口。
+- `MPKD`：在 CRLD 双视图蒸馏目标上增加多中心原型修正，仅重构教师强视图的同视图蒸馏目标。
+- `MPKD` 兼容实验：将原型修正模块适配到 `KD`、`DKD` 和 `NKD` 的类别级蒸馏目标。
 - 原始 `KD`、`DKD`、`NKD`、`CRLD` 训练入口均保留，互不覆盖。
 
 当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心，论文草稿和逐轮实验记录位于 `experiments/`。
@@ -17,7 +17,7 @@
 configs/                 训练配置
 mdistiller/              数据集、模型、蒸馏器和训练引擎
 tools/train.py           原始单视图蒸馏训练入口
-tools/train_proto.py     CRLD-Proto 与 MPKD 训练入口
+tools/train_proto.py     MPKD 及其 KD/DKD/NKD 组合实验入口
 tools/run_*.py           批量实验编排脚本
 tools/eval.py            单模型评估
 tools/prepare_experiments.py  数据和教师权重检查
@@ -56,11 +56,11 @@ python tools/train.py --cfg configs/cifar100/nkd/res32x4_res8x4.yaml
 python tools/train.py --cfg configs/cifar100/crld/res32x4_res8x4.yaml
 ```
 
-### CRLD-Proto
+### MPKD
 
 ```powershell
 python tools/train_proto.py `
-  --cfg configs/cifar100/crld_proto/res32x4_res8x4.yaml `
+  --cfg configs/cifar100/mpkd/res32x4_res8x4.yaml `
   --seed 42
 ```
 
@@ -107,11 +107,11 @@ python tools/run_mpkd_compatibility.py --seed 42
 
 ```powershell
 python tools/train_proto.py `
-  --cfg configs/tinyimagenet200/crld_proto/res32x4_res8x4.yaml `
+  --cfg configs/tinyimagenet200/mpkd/res32x4_res8x4.yaml `
   --seed 42
 
 python tools/train_proto.py `
-  --cfg configs/imagenet/crld_proto/r34_r18.yaml `
+  --cfg configs/imagenet/mpkd/r34_r18.yaml `
   --seed 42
 ```
 

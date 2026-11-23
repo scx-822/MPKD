@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_DIR = ROOT / "configs" / "cifar100" / "mpkd"
+CONFIG_DIR = ROOT / "configs" / "cifar100" / "mpkd_compatibility"
 ARCHITECTURES = {
     "res56_res20": "res56_res20.yaml",
     "res110_res32": "res110_res32.yaml",

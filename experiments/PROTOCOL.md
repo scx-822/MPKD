@@ -7,11 +7,11 @@
 | 方法 | 定位 | 入口 |
 | --- | --- | --- |
 | CRLD | 原始论文基线 | `tools/train.py` + CRLD 配置 |
-| CRLD-Proto | 本项目主方法 | `tools/train_proto.py` + `CRLD_Proto` |
-| MPKD | KD/DKD/NKD 的原型兼容适配器 | `tools/train_proto.py` + `MPKD` |
+| MPKD | 本项目主方法，沿用 CRLD 双视图蒸馏目标 | `tools/train_proto.py` + `MPKD_CRLD` |
+| KD/DKD/NKD + MPKD | 原型模块与类别级蒸馏目标的组合实验 | `tools/train_proto.py` + `MPKD` |
 | KD、DKD、NKD | 原始类别级蒸馏方法 | `tools/train.py` |
 
-CRLD-Proto 保留完整 CRLD 的监督、弱视图同视图和两项交叉视图约束，仅对教师强视图同视图目标执行原型修正。教师和原型在学生训练阶段冻结，原型不参与反向传播。当前正式原型构建为可靠弱视图特征筛选、类内 K-Means 多中心、L2 归一化和固定原型。
+MPKD 沿用 CRLD 的双视图监督结构，仅对教师强视图同视图目标执行多中心原型修正。教师和原型在学生训练阶段冻结，原型不参与反向传播。当前正式原型构建为可靠弱视图特征筛选、类内 K-Means 多中心、L2 归一化和固定原型。
 
 ## 2. 固定设置
 
@@ -29,9 +29,9 @@ CRLD-Proto 保留完整 CRLD 的监督、弱视图同视图和两项交叉视图
 配置按数据集和方法分组：
 
 ```text
-configs/cifar100/crld/        原始 CRLD
-configs/cifar100/crld_proto/  CRLD-Proto
-configs/cifar100/mpkd/        MPKD 兼容实验
+configs/cifar100/crld/                  原始 CRLD 基线
+configs/cifar100/mpkd/                  MPKD 主实验
+configs/cifar100/mpkd_compatibility/    KD/DKD/NKD + MPKD 组合实验
 configs/tinyimagenet200/      Tiny-ImageNet-200
 configs/imagenet/              ImageNet
 ```
@@ -43,7 +43,7 @@ configs/imagenet/              ImageNet
 | 文件 | 用途 |
 | --- | --- |
 | `tools/train.py` | 原始蒸馏训练 |
-| `tools/train_proto.py` | CRLD-Proto 和 MPKD 训练 |
+| `tools/train_proto.py` | MPKD 主实验及兼容组合训练 |
 | `tools/run_cifar100_architectures.py` | CIFAR-100 多架构批量运行 |
 | `tools/run_cifar100_ablations.py` | A-E 与门控消融 |
 | `tools/run_mpkd_compatibility.py` | KD/DKD/NKD 与 MPKD 矩阵 |
@@ -65,15 +65,17 @@ output/<project>/<method>,<teacher>,<student>[,<tag>]/
 
 `worklog.txt` 是原始指标，`student_best` 和 `student_latest` 是模型权重，`train.events/` 是 TensorBoard 日志。一次性冒烟和已废弃调参结果放入 `output/_archive/`，不混入正式结果表。
 
+主实验 YAML 中的 `EXPERIMENT.TAG` 保留为已有输出目录的历史标识，以便续跑和定位既有 checkpoint；方法身份以 `EXPERIMENT.METHOD: MPKD`、配置目录及新 worklog 元数据为准。不要仅为统一显示名而修改这些 tag，否则会切换到新的输出目录。
+
 ## 4. CIFAR-100 消融
 
-默认配置为 `configs/cifar100/crld_proto/res32x4_res8x4.yaml`、seed 42、240 epochs、K=3。
+默认配置为 `configs/cifar100/mpkd/res32x4_res8x4.yaml`、seed 42、240 epochs、K=3。
 
 ### 4.1 A-E
 
 | 模式 | 说明 |
 | --- | --- |
-| A | 完整 CRLD，无原型修正 |
+| A | CRLD 基线，无原型修正 |
 | B | A + 可靠弱视图多中心 K-Means 原型 + 固定融合 |
 | C | B + 强视图不确定度权重 |
 | D | C + 类别一致性和锚定类别正向增益 |
@@ -108,7 +110,7 @@ python tools/run_cifar100_ablations.py --phase gates
 5. WRN40-2 -> WRN40-1
 6. VGG13 -> VGG8
 
-`MPKD.BASE_METHOD` 可选 `KD`、`DKD`、`NKD`。适配器保留所选方法的类别级损失，只在统一双视图框架中修正教师强视图同视图目标；不能把两个完整总损失直接相加。
+兼容配置位于 `configs/cifar100/mpkd_compatibility/`。`MPKD.BASE_METHOD` 可选 `KD`、`DKD`、`NKD`。适配器保留所选方法的类别级损失，只在统一双视图框架中修正教师强视图同视图目标；不能把两个完整总损失直接相加。
 
 ```powershell
 python tools/run_mpkd_compatibility.py --dry-run
@@ -129,7 +131,7 @@ python tools/run_mpkd_compatibility.py --seed 42
 若只验证基础方法在双视图框架中的行为，可关闭原型修正：
 
 ```powershell
-python tools/train_proto.py --cfg configs/cifar100/mpkd/res32x4_res8x4.yaml --seed 42 EXPERIMENT.TAG smoke,dkd,res32x4,res8x4 MPKD.BASE_METHOD DKD MPKD.PROTO_ENABLED false
+python tools/train_proto.py --cfg configs/cifar100/mpkd_compatibility/res32x4_res8x4.yaml --seed 42 EXPERIMENT.TAG smoke,dkd,res32x4,res8x4 MPKD.BASE_METHOD DKD MPKD.PROTO_ENABLED false
 ```
 
 ## 6. 跨数据集运行
@@ -139,7 +141,7 @@ python tools/train_proto.py --cfg configs/cifar100/mpkd/res32x4_res8x4.yaml --se
 数据目录为 `data/tiny-imagenet-200`，教师权重应与 200 类输出匹配。先使用 1 epoch 检查数据、特征提取、原型构建、前向、反向和验证，再恢复正式 epoch：
 
 ```powershell
-python tools/train_proto.py --cfg configs/tinyimagenet200/crld_proto/res32x4_res8x4.yaml --seed 42
+python tools/train_proto.py --cfg configs/tinyimagenet200/mpkd/res32x4_res8x4.yaml --seed 42
 ```
 
 ### ImageNet
@@ -154,7 +156,7 @@ data/imagenet/val/<class>/*.JPEG
 运行示例：
 
 ```powershell
-python tools/train_proto.py --cfg configs/imagenet/crld_proto/r34_r18.yaml --seed 42
+python tools/train_proto.py --cfg configs/imagenet/mpkd/r34_r18.yaml --seed 42
 ```
 
 ImageNet 原始数据不由本项目自动下载；教师权重必须与配置中的架构和类别数一致。

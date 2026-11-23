@@ -5,4 +5,5 @@ trainer_dict = {
     "crd": CRDTrainer,
     "mlld": AugTrainer,
     "crld": CRLDTrainer,
+    "mpkd": CRLDTrainer,
 }

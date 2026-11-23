@@ -2,7 +2,7 @@ EXPERIMENT:
   NAME: ""
   TAG: "crld_proto,res32x4,res8x4"
   PROJECT: "cifar100_baselines"
-  METHOD: "CRLD-Proto"
+  METHOD: "MPKD"
   BASELINE: "CRLD"
 
 DATASET:
@@ -11,7 +11,7 @@ DATASET:
     BATCH_SIZE: 64
 
 DISTILLER:
-  TYPE: "CRLD_Proto"
+  TYPE: "MPKD_CRLD"
   TEACHER: "resnet32x4"
   STUDENT: "resnet8x4"
 
@@ -24,9 +24,9 @@ SOLVER:
   WEIGHT_DECAY: 0.0005
   MOMENTUM: 0.9
   TYPE: "SGD"
-  TRAINER: "crld"
+  TRAINER: "mpkd"
 
-CRLD:
+MPKD:
   TEMPERATURE: 4.0
   CE_WEIGHT: 1.0
   WV_WEIGHT: 2.0

@@ -1,61 +1,61 @@
 {
   "experiment": {
-    "method": "CRLD-Proto",
+    "method": "MPKD",
     "baseline": "CRLD",
-    "relationship": "CRLD-Proto preserves the complete CRLD objective and adds multi-center prototype correction to the teacher strong-view target."
+    "relationship": "MPKD retains the CRLD two-view distillation objective and adds multi-center prototype correction to the teacher strong-view target."
   },
-  "root": "D:\\Experients\\CRLD-main",
+  "root": ".",
   "cifar100": {
     "status": "ready",
-    "data_path": "D:\\Experients\\CRLD-main\\data\\cifar-100-python",
+    "data_path": "data/cifar-100-python",
     "archive": null,
     "teachers": {
       "resnet56": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\resnet56_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/resnet56_vanilla/ckpt_epoch_240.pth"
       },
       "resnet110": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\resnet110_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/resnet110_vanilla/ckpt_epoch_240.pth"
       },
       "resnet32x4": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\resnet32x4_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/resnet32x4_vanilla/ckpt_epoch_240.pth"
       },
       "wrn_40_2": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\wrn_40_2_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/wrn_40_2_vanilla/ckpt_epoch_240.pth"
       },
       "vgg13": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\vgg13_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/vgg13_vanilla/ckpt_epoch_240.pth"
       },
       "ResNet50": {
         "status": "ready",
-        "path": "D:\\Experients\\CRLD-main\\download_ckpts\\cifar_teachers\\ResNet50_vanilla\\ckpt_epoch_240.pth"
+        "path": "download_ckpts/cifar_teachers/ResNet50_vanilla/ckpt_epoch_240.pth"
       }
     }
   },
   "tinyimagenet200": {
     "status": "ready",
-    "path": "D:\\Experients\\CRLD-main\\data\\tiny-imagenet-200"
+    "path": "data/tiny-imagenet-200"
   },
   "imagenet_teachers": {
     "status": "check-only",
     "paths": [
-      "D:\\Experients\\CRLD-main\\download_ckpts\\imagenet_teachers\\ResNet34_vanilla\\ckpt_epoch_90.pth",
-      "D:\\Experients\\CRLD-main\\download_ckpts\\imagenet_teachers\\ResNet50_vanilla\\ckpt_epoch_90.pth"
+      "download_ckpts/imagenet_teachers/ResNet34_vanilla/ckpt_epoch_90.pth",
+      "download_ckpts/imagenet_teachers/ResNet50_vanilla/ckpt_epoch_90.pth"
     ]
   },
   "imagenet": {
     "status": "ready",
-    "path": "D:\\Experients\\CRLD-main\\data\\imagenet",
-    "train": "D:\\Experients\\CRLD-main\\data\\imagenet\\train",
-    "val": "D:\\Experients\\CRLD-main\\data\\imagenet\\val"
+    "path": "data/imagenet",
+    "train": "data/imagenet/train",
+    "val": "data/imagenet/val"
   },
   "tiny_teacher": {
     "status": "ready",
-    "path": "D:\\Experients\\CRLD-main\\download_ckpts\\tinyimagenet_teachers\\resnet32x4_vanilla\\ckpt_epoch_240.pth",
+    "path": "download_ckpts/tinyimagenet_teachers/resnet32x4_vanilla/ckpt_epoch_240.pth",
     "source": "CRLD author-provided checkpoint or local teacher training"
   }
 }

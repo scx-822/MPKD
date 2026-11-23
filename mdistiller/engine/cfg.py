@@ -15,11 +15,12 @@ def show_cfg(cfg):
     dump_cfg.DISTILLER = cfg.DISTILLER
     dump_cfg.SOLVER = cfg.SOLVER
     dump_cfg.LOG = cfg.LOG
-    method_cfg_key = (
-        "CRLD"
-        if cfg.DISTILLER.TYPE == "CRLD_Proto"
-        else cfg.DISTILLER.TYPE
-    )
+    if cfg.DISTILLER.TYPE == "CRLD_Proto":
+        method_cfg_key = "CRLD"
+    elif cfg.DISTILLER.TYPE in {"MPKD_CRLD", "MPKD"}:
+        method_cfg_key = "MPKD"
+    else:
+        method_cfg_key = cfg.DISTILLER.TYPE
     if method_cfg_key in cfg:
         dump_cfg.update({method_cfg_key: cfg.get(method_cfg_key)})
     if cfg.DISTILLER.TYPE == "MPKD":
@@ -209,7 +210,7 @@ CFG.NKD.LOSS.KD_WEIGHT = 1.0
 CFG.NKD.T = 1.0
 CFG.NKD.GAMMA = 1.5
 
-# CRLD CFG
+# CRLD baseline CFG
 CFG.CRLD = CN()
 CFG.CRLD.CE_WEIGHT = 1.0
 CFG.CRLD.WV_WEIGHT = 2.0
@@ -224,7 +225,7 @@ CFG.CRLD.PROTO_TAU_W = 0.8
 CFG.CRLD.PROTO_AGGREGATION = "logmeanexp"
 CFG.CRLD.PROTO_ANCHOR = "weak_teacher"
 CFG.CRLD.PROTO_MAX_SAMPLES_PER_CLASS = 0
-# Ablation controls. The defaults reproduce the complete CRLD-Proto method.
+# Legacy CRLD-Proto config fields retained for old experiment files.
 CFG.CRLD.PROTO_ENABLED = True
 CFG.CRLD.PROTO_FUSION_MODE = "gated"
 CFG.CRLD.PROTO_GATE_UNCERTAINTY = True
@@ -236,6 +237,7 @@ CFG.CRLD.PROTO_GATE_CONFIDENCE = True
 # its original loss parameters; non-None fields below are optional overrides.
 CFG.MPKD = CN()
 CFG.MPKD.BASE_METHOD = "KD"
+# None lets the compatibility adapter inherit the selected KD/DKD/NKD value.
 CFG.MPKD.CE_WEIGHT = None
 CFG.MPKD.KD_WEIGHT = None
 CFG.MPKD.TEMPERATURE = None
@@ -253,6 +255,7 @@ CFG.MPKD.PROTO_FUSION_SCALE = 0.5
 CFG.MPKD.PROTO_TEMP = 0.5
 CFG.MPKD.PROTO_TAU_W = 0.8
 CFG.MPKD.PROTO_K = 3
+CFG.MPKD.PROTO_ANCHOR = "weak_teacher"
 CFG.MPKD.PROTO_AGGREGATION = "logmeanexp"
 CFG.MPKD.PROTO_MAX_SAMPLES_PER_CLASS = 0
 CFG.MPKD.PROTO_GATE_UNCERTAINTY = True

@@ -12,7 +12,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = Path("configs/cifar100/crld_proto/res32x4_res8x4.yaml")
+DEFAULT_CONFIG = Path("configs/cifar100/mpkd/res32x4_res8x4.yaml")
 AGGREGATIONS = ("logmeanexp", "mean", "max")
 
 
@@ -66,11 +66,11 @@ def build_runs(config, args):
             if k < 1:
                 raise ValueError("All K values must be at least 1.")
             suffix = f"structure_k{k}"
-            runs.append((suffix, {"CRLD.PROTO_K": str(k)}))
+            runs.append((suffix, {"MPKD.PROTO_K": str(k)}))
     if args.mode in {"aggregation", "all"}:
         for aggregation in args.aggregations:
             suffix = f"structure_agg_{aggregation}"
-            runs.append((suffix, {"CRLD.PROTO_AGGREGATION": aggregation}))
+            runs.append((suffix, {"MPKD.PROTO_AGGREGATION": aggregation}))
     return [
         {
             "suffix": suffix,

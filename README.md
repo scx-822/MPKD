@@ -9,7 +9,7 @@
 - `MPKD` 兼容实验：将原型修正模块适配到 `KD`、`DKD` 和 `NKD` 的类别级蒸馏目标。
 - 原始 `KD`、`DKD`、`NKD`、`CRLD` 训练入口均保留，互不覆盖。
 
-当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心，论文草稿和逐轮实验记录位于 `experiments/`。
+当前正式原型构建使用可靠弱视图教师特征和类内 K-Means 多中心；实验复现协议与结构化结果位于 `experiments/`。
 
 ## 目录结构
 
@@ -117,12 +117,11 @@ python tools/train_proto.py `
 
 显存不足时，优先在 YAML 中降低 `SOLVER.BATCH_SIZE`，并使用梯度累积；不要改变 `LR_DECAY_STAGES`，除非实验设计明确要求。
 
-### 评估、鲁棒性和论文导出
+### 评估和鲁棒性
 
 ```powershell
 python tools/eval.py --dataset cifar100 --model resnet8x4 --ckpt <checkpoint>
 python tools/evaluate_robustness.py --help
-python tools/export_paper_docx.py --help
 ```
 
 ## 输出与记录
@@ -133,13 +132,12 @@ python tools/export_paper_docx.py --help
 output/<project>/<tag>/
 ```
 
-每个实验目录中的 `worklog.txt` 是准确率和最佳轮次的原始依据。实验资料索引见 `experiments/README.md`，结果与详细记录统一见 `experiments/log.md`，实验协议和文件说明见 `experiments/PROTOCOL.md`。
+每个实验目录中的 `worklog.txt` 是准确率和最佳轮次的原始依据。实验资料索引见 `experiments/README.md`，实验协议和文件说明见 `experiments/PROTOCOL.md`。
 
 `output/_archive/` 只存放 1 epoch 冒烟和未采用的调参候选，不参与正式结果汇总。
 
 ## 实验材料
 
-- `experiments/log.md`：结构化结果、实验状态、逐轮日志和参数汇总。
 - `experiments/PROTOCOL.md`：运行协议与文件说明。
 - `experiments/robustness/`：鲁棒性分析数据和图表。
 

@@ -50,7 +50,6 @@ configs/imagenet/              ImageNet
 | `tools/prepare_experiments.py` | 数据、权重和资源清单检查 |
 | `tools/eval.py` | checkpoint 评估 |
 | `tools/evaluate_robustness.py` | 强视图鲁棒性评估和制图 |
-| `tools/export_paper_docx.py` | Markdown 论文导出 Word |
 | `tools/train_crld.py`、`tools/train_mlld.py` | 历史专用训练入口，保留兼容性 |
 
 根目录不再放置批量实验脚本。旧的中文文件名入口已迁移为 `tools/run_cifar100_architectures.py`。
